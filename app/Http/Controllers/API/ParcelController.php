@@ -135,19 +135,19 @@ class ParcelController extends Controller
         DB::commit();
 
         // 🤖 AI Auto-Assignment after parcel creation
-        \Log::info('Checking AI assignment for parcel: ' . $parcel->parcel_id . ', assigned_to: ' . ($assigned_to ?? 'null'));
+        // \Log::info('Checking AI assignment for parcel: ' . $parcel->parcel_id . ', assigned_to: ' . ($assigned_to ?? 'null'));
         
-        if (!$assigned_to) {
-            \Log::info('Calling AI service for parcel: ' . $parcel->parcel_id);
-            $aiService = new \App\Services\AIOnlyRiderAssignmentService();
-            $aiResult = $aiService->assignParcels();
-            \Log::info('AI Result: ' . json_encode($aiResult));
-            
-            // Refresh parcel to get updated assigned_to
-            $parcel->refresh();
-            $assigned_to = $parcel->assigned_to;
-            \Log::info('After refresh, assigned_to: ' . ($assigned_to ?? 'null'));
-        }
+        // if (!$assigned_to) {
+        //     \Log::info('Calling AI service for parcel: ' . $parcel->parcel_id);
+        //     $aiService = new \App\Services\AIOnlyRiderAssignmentService();
+        //     $aiResult = $aiService->assignParcels();
+        //     \Log::info('AI Result: ' . json_encode($aiResult));
+        //     
+        //     // Refresh parcel to get updated assigned_to
+        //     $parcel->refresh();
+        //     $assigned_to = $parcel->assigned_to;
+        //     \Log::info('After refresh, assigned_to: ' . ($assigned_to ?? 'null'));
+        // }
 
         // ✅ Send Email verification code to client
         $emailStatus = 'not_sent';

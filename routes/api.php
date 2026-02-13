@@ -6,11 +6,29 @@ use App\Http\Controllers\API\UserController;
 use App\Http\Controllers\API\RiderController;
 use App\Http\Controllers\API\TrackingController;
 use App\Http\Controllers\API\RiderDashboardController;
+use App\Http\Controllers\API\RiderRegistrationController;
+use App\Http\Controllers\API\RiderAuthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\AdminDashboardController;
+
+// Debug route
+require __DIR__.'/debug.php';
+
+// Rider Registration routes
+Route::post('/rider-registrations', [RiderRegistrationController::class, 'store']);
+Route::get('/rider-registrations', [RiderRegistrationController::class, 'index']);
+Route::post('/rider-registrations/{id}/approve', [RiderRegistrationController::class, 'approve']);
+Route::post('/rider-registrations/{id}/reject', [RiderRegistrationController::class, 'reject']);
+Route::post('/rider-registrations/check-status', [RiderRegistrationController::class, 'checkStatus']);
+Route::get('/rider-registrations/{id}/document/{type}', [RiderRegistrationController::class, 'getDocument']);
+
+// Rider Authentication
+Route::post('/rider/signup', [RiderAuthController::class, 'signup']);
+Route::post('/rider/login', [RiderAuthController::class, 'login']);
+Route::post('/rider/check-status', [RiderRegistrationController::class, 'checkStatus']);
 
 // Authentication
 Route::post('/register', [AuthController::class, 'register']);
@@ -83,11 +101,11 @@ Route::post('/rider/parcel/{parcelId}/stop-tracking', [RiderDashboardController:
 
 // User Management
 Route::get('/riders', [UserController::class, 'getAllRiders']);
-Route::get('/riders/{id}', [RiderController::class, 'show']);
-Route::get('/riders/{id}/parcels', [RiderController::class, 'parcels']);
 Route::post('/riders', [UserController::class, 'createRider']);
+Route::get('/riders/{id}', [UserController::class, 'getRider']);
 Route::put('/riders/{id}', [UserController::class, 'updateRider']);
 Route::delete('/riders/{id}', [UserController::class, 'deleteRider']);
+Route::get('/riders/{id}/parcels', [RiderController::class, 'parcels']);
 Route::get('/merchants', [UserController::class, 'getAllMerchants']);
 Route::post('/merchants', [UserController::class, 'createMerchant']);
 Route::put('/merchants/{id}', [UserController::class, 'updateMerchant']);
@@ -127,4 +145,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/address', [AddressController::class, 'store']);
     Route::get('/address/{id}', [AddressController::class, 'show']);
     Route::get('/address', [AddressController::class, 'index']);
+});
+
+// Rider Protected Routes
+Route::middleware('auth:rider')->group(function () {
+    Route::get('/rider/profile', [RiderAuthController::class, 'profile']);
 });
