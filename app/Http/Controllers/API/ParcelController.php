@@ -55,7 +55,8 @@ class ParcelController extends Controller
         'assigned_to' => 'nullable|integer|exists:users,id',
         'pickup_location' => 'required|string',
         'pickup_city' => 'required|string',
-        'dropoff_location' => 'required|string',
+       
+        
         'dropoff_city' => 'nullable|string',
         'parcel_status' => 'nullable|in:pending,in_transit,delivered,cancelled,picked_up,out_for_delivery',
         'payment_method' => 'required|in:cod,online',
@@ -108,13 +109,19 @@ class ParcelController extends Controller
             'company_payout' => $company_payout,
         ]);
 
-        // ✅ Parcel details create
+        // ✅ Geocode client address and save coordinates
+        $geocodingService = new \App\Services\GeocodingService();
+        $coords = $geocodingService->geocodeAddress($request->client_address);
+        
+        // ✅ Parcel details create with coordinates
         ParcelDetail::create([
             'parcel_id' => $parcel->parcel_id,
             'client_name' => $request->client_name,
             'client_phone_number' => $request->client_phone_number,
             'client_address' => $request->client_address,
             'client_email' => $request->client_email,
+            'delivery_latitude' => $coords['latitude'] ?? null,
+            'delivery_longitude' => $coords['longitude'] ?? null,
         ]);
 
         // ✅ Generate and save 4-digit code for the parcel
@@ -311,7 +318,6 @@ public function update(Request $request, $id)
 
     $validator = Validator::make($request->all(), [
         'tracking_code' => 'string|unique:parcel,tracking_code,' . $id . ',parcel_id',
-        'assigned_to' => 'nullable|string',  // Allow null or 'N/A'
         'pickup_location' => 'string',
         'pickup_city' => 'string',
         'dropoff_location' => 'string',
@@ -478,6 +484,7 @@ public function verifyDelivery(Request $request)
     }
 
     $parcel->parcel_status = 'delivered';
+     $parcel->tracking_active = 0;
     $parcel->save();
 
     return response()->json([

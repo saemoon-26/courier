@@ -20,32 +20,11 @@ class UserController extends Controller
             ->get();
         
         $ridersData = $riders->map(function($rider) {
-            // Debug for rider ID 42
-            if ($rider->id == 42) {
-                \Log::info('Debug Rider 42:', [
-                    'rider_id' => $rider->id,
-                    'name' => $rider->first_name . ' ' . $rider->last_name
-                ]);
-            }
-            
-            // Real-time count from database - always accurate
+            // Count ALL parcels regardless of status
             $assignedParcels = DB::table('parcel')
                 ->where('assigned_to', $rider->id)
-                ->whereIn('parcel_status', ['pending', 'picked_up', 'in_transit'])
+                ->whereNotNull('assigned_to')
                 ->count();
-            
-            // Debug query for rider 42
-            if ($rider->id == 42) {
-                $debugParcels = DB::table('parcel')
-                    ->where('assigned_to', $rider->id)
-                    ->get();
-                
-                \Log::info('Rider 42 Parcels:', [
-                    'total_parcels' => $debugParcels->count(),
-                    'active_count' => $assignedParcels,
-                    'parcels' => $debugParcels->toArray()
-                ]);
-            }
             
             // Total parcels ever assigned (for reference)
             $totalParcels = DB::table('parcel')
@@ -104,16 +83,6 @@ class UserController extends Controller
             
             // Get address data
             $address = Address::where('user_id', $merchant->id)->first();
-            
-            // Debug info for merchant ID 10
-            if ($merchant->id == 10) {
-                \Log::info('Merchant 10 debug:', [
-                    'user' => $merchant->toArray(),
-                    'company_id' => $merchant->company_id,
-                    'company' => $company ? $company->toArray() : null,
-                    'address' => $address ? $address->toArray() : null
-                ]);
-            }
             
             return [
                 'id' => $merchant->id,

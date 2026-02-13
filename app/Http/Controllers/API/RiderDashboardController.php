@@ -1,53 +1,121 @@
 <?php
 
 namespace App\Http\Controllers\API;
+
 use App\Http\Controllers\Controller;
-use App\Models\Parcel;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Auth;
+use App\Models\Parcel;
+use App\Models\RiderLocation;
+use App\Services\GeocodingService;
 
 class RiderDashboardController extends Controller
 {
+    // Get all assigned parcels for rider
+    public function getAssignedParcels($riderId)
+    {
+        $parcels = Parcel::with('details')
+            ->where('assigned_to', $riderId)
+            ->whereIn('parcel_status', ['assigned', 'picked_up', 'out_for_delivery'])
+            ->get();
 
-public function index()
-{
-    $riderId = Auth::id(); // or pass via $request->rider_id
+        $result = $parcels->map(function($parcel) {
+            $destinationAddress = $parcel->details->client_address ?? ($parcel->dropoff_location . ', ' . $parcel->dropoff_city);
+            
+            return [
+                'parcel_id' => $parcel->parcel_id,
+                'tracking_code' => $parcel->tracking_code,
+                'status' => $parcel->parcel_status,
+                'tracking_active' => $parcel->tracking_active ?? false,
+                'client_name' => $parcel->details->client_name ?? 'N/A',
+                'client_phone' => $parcel->details->client_phone_number ?? 'N/A',
+                'client_address' => $destinationAddress,
+                'destination_lat' => $parcel->details->delivery_latitude,
+                'destination_lng' => $parcel->details->delivery_longitude,
+                'pickup_location' => $parcel->pickup_location,
+                'rider_payout' => $parcel->rider_payout
+            ];
+        });
 
-    // ✅ Total parcels assigned to this rider
-    $totalParcels = Parcel::where('assigned_to', $riderId)->count();
+        return response()->json([
+            'status' => true,
+            'data' => $result
+        ]);
+    }
 
-    // ✅ Total delivered parcels
-    $deliveredParcels = Parcel::where('assigned_to', $riderId)
-                              ->where('parcel_status', 'delivered')
-                              ->count();
+    // Start tracking - Rider clicks "Start Tracking" button
+    public function startTracking($parcelId)
+    {
+        $parcel = Parcel::where('parcel_id', $parcelId)->first();
 
-    // ✅ Total declined (cancelled) parcels
-    $declinedParcels = Parcel::where('assigned_to', $riderId)
-                             ->where('parcel_status', 'cancelled')
-                             ->count();
+        if (!$parcel) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Parcel not found'
+            ], 404);
+        }
 
-    return response()->json([
-        'total_parcels' => $totalParcels,
-        'delivered_parcels' => $deliveredParcels,
-        'declined_parcels' => $declinedParcels,
-    ]);
-}
+        $parcel->tracking_active = true;
+        $parcel->parcel_status = 'out_for_delivery';
+        $parcel->save();
 
-public function cashReport()
-{
-    $riderId = Auth::id();
+        // Get destination coordinates
+        $destinationAddress = $parcel->details->client_address ?? ($parcel->dropoff_location . ', ' . $parcel->dropoff_city);
+        
+        if ($parcel->details && $parcel->details->delivery_latitude && $parcel->details->delivery_longitude) {
+            $destination = [
+                'latitude' => $parcel->details->delivery_latitude,
+                'longitude' => $parcel->details->delivery_longitude,
+                'address' => $destinationAddress
+            ];
+        } else {
+            $geocodingService = new GeocodingService();
+            $coords = $geocodingService->geocodeAddress($destinationAddress);
+            
+            $destination = [
+                'latitude' => $coords['latitude'] ?? 31.4504,
+                'longitude' => $coords['longitude'] ?? 73.1350,
+                'address' => $destinationAddress
+            ];
+        }
 
-    $totalDeliveredCash = DB::table('parcels as p')
-        ->join('parcel_details as pd', 'p.parcel_id', '=', 'pd.parcel_id')
-        ->where('p.assigned_to', $riderId)
-        ->where('p.payment_method', 'cod')
-        ->where('p.parcel_status', 'delivered')
-        ->sum('pd.parcel_amount');
+        return response()->json([
+            'status' => true,
+            'message' => 'Tracking started successfully',
+            'data' => [
+                'parcel' => [
+                    'id' => $parcel->parcel_id,
+                    'tracking_code' => $parcel->tracking_code,
+                    'status' => $parcel->parcel_status,
+                    'tracking_active' => true
+                ],
+                'client' => [
+                    'name' => $parcel->details->client_name ?? 'N/A',
+                    'phone' => $parcel->details->client_phone_number ?? 'N/A',
+                    'address' => $destinationAddress
+                ],
+                'destination' => $destination
+            ]
+        ]);
+    }
 
-    return response()->json([
-        'rider_cod_cash' => $totalDeliveredCash
-    ]);
-}
+    // Stop tracking
+    public function stopTracking($parcelId)
+    {
+        $parcel = Parcel::where('parcel_id', $parcelId)->first();
 
+        if (!$parcel) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Parcel not found'
+            ], 404);
+        }
+
+        $parcel->tracking_active = false;
+        $parcel->save();
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Tracking stopped'
+        ]);
+    }
 }
