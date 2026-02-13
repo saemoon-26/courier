@@ -4,6 +4,8 @@ use App\Http\Controllers\API\ParcelController;
 use App\Http\Controllers\API\AddressController;
 use App\Http\Controllers\API\UserController;
 use App\Http\Controllers\API\RiderController;
+use App\Http\Controllers\API\TrackingController;
+use App\Http\Controllers\API\RiderDashboardController;
 use App\Http\Controllers\API\RiderRegistrationController;
 use App\Http\Controllers\API\RiderAuthController;
 use Illuminate\Http\Request;
@@ -41,6 +43,61 @@ Route::get('/parcels/{id}', [ParcelController::class, 'show']);
 Route::put('/parcels/{id}', [ParcelController::class, 'update']);
 Route::delete('/parcels/{id}', [ParcelController::class, 'destroy']);
 Route::post('/verify-delivery', [ParcelController::class, 'verifyDelivery']);
+
+// Real-time Tracking
+Route::post('/rider/location/update', [TrackingController::class, 'updateRiderLocation']);
+Route::post('/riders/location/update', [TrackingController::class, 'updateRiderLocation']);
+Route::post('/riders/tracking/start', [TrackingController::class, 'startTracking']);
+Route::post('/riders/tracking/stop', [TrackingController::class, 'stopTracking']);
+Route::get('/parcel/{parcelId}/rider-location', [TrackingController::class, 'getRiderLocation']);
+Route::get('/track/{trackingCode}', [TrackingController::class, 'trackByCode']);
+Route::get('/track/live/{trackingCode}', [TrackingController::class, 'trackByCode']);
+
+// Test geocoding
+Route::get('/test-geocode', function() {
+    $address = request('address', 'medina town faisalabad');
+    $service = new \App\Services\GeocodingService();
+    $result = $service->geocodeAddress($address);
+    return response()->json([
+        'address' => $address,
+        'result' => $result,
+        'status' => 'working'
+    ]);
+});
+
+// Test simple endpoint
+Route::get('/test', function() {
+    return response()->json(['status' => 'API Working', 'time' => now()]);
+});
+
+// Geocode address endpoint
+Route::post('/geocode-address', function(\Illuminate\Http\Request $request) {
+    $address = $request->input('address');
+    if (!$address) {
+        return response()->json(['success' => false, 'message' => 'Address required'], 400);
+    }
+    
+    $service = new \App\Services\GeocodingService();
+    $result = $service->geocodeAddress($address);
+    
+    if ($result) {
+        return response()->json([
+            'success' => true,
+            'coordinates' => [
+                'latitude' => $result['latitude'],
+                'longitude' => $result['longitude']
+            ],
+            'display_name' => $result['display_name']
+        ]);
+    }
+    
+    return response()->json(['success' => false, 'message' => 'Unable to geocode address'], 404);
+});
+
+// Rider Dashboard - View delivery route and client location
+Route::get('/rider/{riderId}/assigned-parcels', [RiderDashboardController::class, 'getAssignedParcels']);
+Route::post('/rider/parcel/{parcelId}/start-tracking', [RiderDashboardController::class, 'startTracking']);
+Route::post('/rider/parcel/{parcelId}/stop-tracking', [RiderDashboardController::class, 'stopTracking']);
 
 // User Management
 Route::get('/riders', [UserController::class, 'getAllRiders']);

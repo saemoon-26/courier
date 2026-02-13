@@ -12,7 +12,7 @@ public $timestamps = false;
 
 protected $fillable = [
     'parcel_id', 'parcel_amount' ,'client_name', 'client_phone_number',
-    'client_address', 'client_email'
+    'client_address', 'client_email', 'delivery_latitude', 'delivery_longitude'
 ];
 
 public function parcel()

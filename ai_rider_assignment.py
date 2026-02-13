@@ -27,11 +27,12 @@ class RealAIRiderAssignment:
         conn = self.connect_db()
         cursor = conn.cursor(dictionary=True)
         
-        # Get pending parcels
+        # Get pending parcels with client address
         cursor.execute("""
-            SELECT parcel_id, pickup_city, pickup_location, dropoff_city 
-            FROM parcel 
-            WHERE assigned_to IS NULL AND parcel_status = 'pending'
+            SELECT p.parcel_id, p.pickup_city, p.pickup_location, pd.client_address
+            FROM parcel p
+            LEFT JOIN parcel_details pd ON p.parcel_id = pd.parcel_id
+            WHERE p.assigned_to IS NULL AND p.parcel_status = 'pending'
         """)
         parcels = cursor.fetchall()
         
@@ -44,14 +45,13 @@ class RealAIRiderAssignment:
         cursor.execute("""
             SELECT u.id, u.first_name, u.last_name, u.rating, 
                    a.city, a.address,
-                   COUNT(p.parcel_id) as active_parcels
+                   COUNT(CASE WHEN p.parcel_status IN ('pending', 'picked_up', 'in_transit', 'out_for_delivery') THEN 1 END) as active_parcels
             FROM users u
             JOIN address a ON u.id = a.user_id
-            LEFT JOIN parcel p ON u.id = p.assigned_to 
-                AND p.parcel_status IN ('pending', 'picked_up', 'in_transit')
+            LEFT JOIN parcel p ON u.id = p.assigned_to
             WHERE u.role = 'rider'
             GROUP BY u.id, u.first_name, u.last_name, u.rating, a.city, a.address
-            HAVING active_parcels < 5
+            HAVING active_parcels <= 5
         """)
         riders = cursor.fetchall()
         
@@ -62,7 +62,7 @@ class RealAIRiderAssignment:
         
         # Get historical assignments for training
         cursor.execute("""
-            SELECT p.pickup_city, p.pickup_location, p.dropoff_city,
+            SELECT p.pickup_city, p.pickup_location,
                    u.id as rider_id, a.city as rider_city, a.address as rider_address,
                    u.rating, p.parcel_status,
                    CASE WHEN p.parcel_status = 'delivered' THEN 1 ELSE 0 END as success
