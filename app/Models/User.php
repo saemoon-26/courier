@@ -15,7 +15,6 @@ class User extends Authenticatable
         'first_name',
         'last_name',
         'email',
-        'phone',
         'password',
         'role',
         'location_id',
@@ -26,8 +25,8 @@ class User extends Authenticatable
         'status',
     ];
 
-    // Auto-load address relation
-    protected $with = ['address'];
+    // Auto-load address relation when needed
+    // protected $with = ['address'];
 
     public function address(): HasOne
     {

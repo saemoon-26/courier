@@ -20,6 +20,9 @@ class UserController extends Controller
             ->get();
         
         $ridersData = $riders->map(function($rider) {
+            // Get registration data if exists
+            $registration = \App\Models\RiderRegistration::where('email', $rider->email)->first();
+            
             // Debug for rider ID 42
             if ($rider->id == 42) {
                 \Log::info('Debug Rider 42:', [
@@ -68,12 +71,27 @@ class UserController extends Controller
                 'per_parcel_payout' => $rider->per_parcel_payout,
                 'rating' => $rider->rating ?? 5.0,
                 'status' => $rider->status ?? 'active',
+                'profile_image' => $rider->profile_image ? asset('storage/' . $rider->profile_image) : null,
+                'id_document' => $rider->id_document ? asset('storage/' . $rider->id_document) : null,
+                'license_document' => $rider->license_document ? asset('storage/' . $rider->license_document) : null,
                 'assigned_parcels_count' => $assignedParcels,
                 'total_parcels_assigned' => $totalParcels,
                 'completed_today' => $completedToday,
                 'is_available' => $assignedParcels < 5,
                 'workload_status' => $assignedParcels >= 5 ? 'busy' : ($assignedParcels >= 3 ? 'moderate' : 'light'),
                 'address' => $rider->address,
+                'registration_data' => $registration ? [
+                    'full_name' => $registration->full_name,
+                    'father_name' => $registration->father_name,
+                    'cnic_number' => $registration->cnic_number,
+                    'vehicle_type' => $registration->vehicle_type,
+                    'vehicle_brand' => $registration->vehicle_brand,
+                    'vehicle_model' => $registration->vehicle_model,
+                    'vehicle_registration' => $registration->vehicle_registration,
+                    'bank_name' => $registration->bank_name,
+                    'account_number' => $registration->account_number,
+                    'registration_status' => $registration->status
+                ] : null,
                 'last_updated' => now()->toDateTimeString()
             ];
         });
@@ -88,6 +106,45 @@ class UserController extends Controller
                 'total_active_parcels' => $ridersData->sum('assigned_parcels_count')
             ]
         ]);
+    }
+
+    // Get single rider
+    public function getRider($id)
+    {
+        try {
+            $rider = User::where('role', 'rider')->findOrFail($id);
+            $address = Address::where('user_id', $rider->id)->first();
+            
+            // Get assigned parcels count
+            $assignedParcels = DB::table('parcel')
+                ->where('assigned_to', $rider->id)
+                ->whereIn('parcel_status', ['pending', 'picked_up', 'in_transit'])
+                ->count();
+            
+            return response()->json([
+                'status' => true,
+                'data' => [
+                    'id' => $rider->id,
+                    'first_name' => $rider->first_name,
+                    'last_name' => $rider->last_name,
+                    'email' => $rider->email,
+                    'phone' => $rider->phone,
+                    'per_parcel_payout' => $rider->per_parcel_payout,
+                    'rating' => $rider->rating ?? 5.0,
+                    'status' => $rider->status ?? 'active',
+                    'profile_image' => $rider->profile_image ? asset('storage/' . $rider->profile_image) : null,
+                    'id_document' => $rider->id_document ? asset('storage/' . $rider->id_document) : null,
+                    'license_document' => $rider->license_document ? asset('storage/' . $rider->license_document) : null,
+                    'assigned_parcels_count' => $assignedParcels,
+                    'address' => $address
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Rider not found'
+            ], 404);
+        }
     }
 
     // Get all merchants
@@ -139,12 +196,15 @@ class UserController extends Controller
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
             'email' => 'required|email|unique:users,email',
-            'per_parcel_payout' => 'required|numeric|min:0',
-            'address.city' => 'required|string|max:100',
-            'address.address' => 'required|string',
-            'address.country' => 'required|string|max:100',
-            'address.state' => 'required|string|max:100',
-            'address.zipcode' => 'required|string|max:20',
+            'phone' => 'required|string|max:20',
+            'city' => 'required|string|max:100',
+            'address' => 'required|string',
+            'country' => 'required|string|max:100',
+            'state' => 'required|string|max:100',
+            'zipcode' => 'required|string|max:20',
+            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'id_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            'license_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
         ]);
 
         if ($validator->fails()) {
@@ -154,7 +214,78 @@ class UserController extends Controller
             ], 422);
         }
 
-        return $this->createUserWithAddress($request, 'rider');
+        DB::beginTransaction();
+        try {
+            // Handle file uploads
+            $profileImagePath = null;
+            $idDocumentPath = null;
+            $licenseDocumentPath = null;
+
+            if ($request->hasFile('profile_image')) {
+                $profileImagePath = $request->file('profile_image')->store('riders/profiles', 'public');
+            }
+
+            if ($request->hasFile('id_document')) {
+                $idDocumentPath = $request->file('id_document')->store('riders/documents', 'public');
+            }
+
+            if ($request->hasFile('license_document')) {
+                $licenseDocumentPath = $request->file('license_document')->store('riders/documents', 'public');
+            }
+
+            // Create user
+            $user = User::create([
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'email' => $request->email,
+                'phone' => $request->phone,
+                'password' => Hash::make('password123'),
+                'role' => 'rider',
+                'profile_image' => $profileImagePath,
+                'id_document' => $idDocumentPath,
+                'license_document' => $licenseDocumentPath,
+            ]);
+
+            // Create address (skip for now due to missing columns)
+            // $address = Address::create([
+            //     'user_id' => $user->id,
+            //     'city' => $request->city,
+            //     'address' => $request->address,
+            //     'country' => $request->country,
+            //     'state' => $request->state,
+            //     'zipcode' => $request->zipcode,
+            // ]);
+
+            // $user->address_id = $address->id;
+            // $user->save();
+
+            DB::commit();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Rider registered successfully',
+                'data' => [
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'role' => $user->role,
+                    'profile_image' => $profileImagePath ? asset('storage/' . $profileImagePath) : null,
+                    'id_document' => $idDocumentPath ? asset('storage/' . $idDocumentPath) : null,
+                    'license_document' => $licenseDocumentPath ? asset('storage/' . $licenseDocumentPath) : null,
+                    'address' => $address
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to register rider',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // Create merchant
