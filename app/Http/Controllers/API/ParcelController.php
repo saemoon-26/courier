@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\ParcelCodeMail;
+use App\Mail\DeliveryRequestMail;
 
 class ParcelController extends Controller
 {
@@ -499,6 +500,105 @@ private function extractCityFromLocation($location)
 {
     $parts = array_map('trim', explode(',', $location));
     return end($parts);
+}
+
+public function getMerchantParcels($merchantId)
+{
+    try {
+        $parcels = DB::table('parcel')
+            ->where('merchant_id', $merchantId)
+            ->orderBy('created_at', 'desc')
+            ->get();
+        
+        return response()->json($parcels);
+    } catch (\Exception $e) {
+        return response()->json(['error' => 'Failed to fetch parcels'], 500);
+    }
+}
+
+public function requestDelivery(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'merchant_id' => 'required|integer',
+        'merchant_name' => 'required|string',
+        'pickup_location' => 'required|string',
+        'pickup_city' => 'required|string',
+        'dropoff_location' => 'required|string',
+        'dropoff_city' => 'required|string',
+        'payment_method' => 'required|in:cod,online',
+        'client_name' => 'required|string',
+        'client_phone' => 'required|string',
+        'client_address' => 'required|string',
+        'client_email' => 'nullable|email',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['status' => false, 'errors' => $validator->errors()], 422);
+    }
+
+    DB::beginTransaction();
+    try {
+        $trackingCode = 'TRK-' . strtoupper(substr(uniqid(), -8));
+        
+        $parcel = Parcel::create([
+            'tracking_code' => $trackingCode,
+            'merchant_id' => $request->merchant_id,
+            'pickup_location' => $request->pickup_location,
+            'pickup_city' => $request->pickup_city,
+            'dropoff_location' => $request->dropoff_location,
+            'dropoff_city' => $request->dropoff_city,
+            'parcel_status' => 'pending',
+            'payment_method' => $request->payment_method,
+        ]);
+
+        ParcelDetail::create([
+            'parcel_id' => $parcel->parcel_id,
+            'client_name' => $request->client_name,
+            'client_phone_number' => $request->client_phone,
+            'client_address' => $request->client_address,
+            'client_email' => $request->client_email,
+        ]);
+
+        $uniqueCode = ParcelCode::generateUniqueCode();
+        ParcelCode::create([
+            'parcel_id' => $parcel->parcel_id,
+            'code' => $uniqueCode
+        ]);
+
+        DB::commit();
+
+        // Send email to admin
+        $deliveryData = [
+            'tracking_code' => $trackingCode,
+            'merchant_name' => $request->merchant_name,
+            'pickup_location' => $request->pickup_location,
+            'pickup_city' => $request->pickup_city,
+            'dropoff_location' => $request->dropoff_location,
+            'dropoff_city' => $request->dropoff_city,
+            'payment_method' => $request->payment_method,
+            'client_name' => $request->client_name,
+            'client_phone' => $request->client_phone,
+            'client_address' => $request->client_address,
+            'client_email' => $request->client_email,
+        ];
+
+        try {
+            Mail::to(env('ADMIN_EMAIL', 'admin@courierhub.com'))->send(new DeliveryRequestMail($deliveryData));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send delivery request email: ' . $e->getMessage());
+        }
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Delivery request submitted successfully',
+            'tracking_code' => $trackingCode,
+            'verification_code' => $uniqueCode
+        ], 201);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['status' => false, 'error' => $e->getMessage()], 500);
+    }
 }
 
 }
