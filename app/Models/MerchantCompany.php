@@ -13,6 +13,13 @@ class MerchantCompany extends Model
         'company_name',
         'address',
         'per_parcel_rate',
+        'product_type',
+        'approval_status',
+        'is_active',
+        'bank_name',
+        'account_number',
+        'avg_parcels_per_day',
+        'business_document',
     ];
 
     // Relationships

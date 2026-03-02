@@ -153,33 +153,24 @@ class UserController extends Controller
         $merchants = User::where('role', 'merchant')->get();
         
         $merchantsData = $merchants->map(function($merchant) {
-            // Get company data
             $company = null;
             if ($merchant->company_id) {
                 $company = \App\Models\MerchantCompany::find($merchant->company_id);
             }
             
-            // Get address data
             $address = Address::where('user_id', $merchant->id)->first();
-            
-            // Debug info for merchant ID 10
-            if ($merchant->id == 10) {
-                \Log::info('Merchant 10 debug:', [
-                    'user' => $merchant->toArray(),
-                    'company_id' => $merchant->company_id,
-                    'company' => $company ? $company->toArray() : null,
-                    'address' => $address ? $address->toArray() : null
-                ]);
-            }
             
             return [
                 'id' => $merchant->id,
                 'first_name' => $merchant->first_name,
                 'last_name' => $merchant->last_name,
                 'email' => $merchant->email,
+                'phone' => $merchant->phone,
                 'per_parcel_payout' => $merchant->per_parcel_payout,
                 'company' => $company,
-                'address' => $address
+                'address' => $address,
+                'approval_status' => $company ? $company->approval_status : 'pending',
+                'is_active' => $company ? $company->is_active : 0,
             ];
         });
         
@@ -187,6 +178,42 @@ class UserController extends Controller
             'status' => true,
             'data' => $merchantsData
         ]);
+    }
+
+    // Get single merchant
+    public function getMerchant($id)
+    {
+        try {
+            $merchant = User::where('role', 'merchant')->findOrFail($id);
+            
+            $company = null;
+            if ($merchant->company_id) {
+                $company = \App\Models\MerchantCompany::find($merchant->company_id);
+            }
+            
+            $address = Address::where('user_id', $merchant->id)->first();
+            
+            return response()->json([
+                'status' => true,
+                'data' => [
+                    'id' => $merchant->id,
+                    'first_name' => $merchant->first_name,
+                    'last_name' => $merchant->last_name,
+                    'email' => $merchant->email,
+                    'phone' => $merchant->phone,
+                    'per_parcel_payout' => $merchant->per_parcel_payout,
+                    'company' => $company,
+                    'address' => $address,
+                    'approval_status' => $company ? $company->approval_status : 'pending',
+                    'is_active' => $company ? $company->is_active : 0,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Merchant not found'
+            ], 404);
+        }
     }
 
     // Create rider

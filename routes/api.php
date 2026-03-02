@@ -6,6 +6,7 @@ use App\Http\Controllers\API\UserController;
 use App\Http\Controllers\API\RiderController;
 use App\Http\Controllers\API\RiderRegistrationController;
 use App\Http\Controllers\API\RiderAuthController;
+use App\Http\Controllers\API\MerchantRegistrationController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,28 @@ Route::post('/rider/check-status', [RiderRegistrationController::class, 'checkSt
 
 // Authentication
 Route::post('/register', [AuthController::class, 'register']);
+Route::post('/merchant-registrations', [MerchantRegistrationController::class, 'store']);
+Route::post('/merchant/check-status', function(Request $request) {
+    $request->validate(['email' => 'required|email']);
+    
+    $user = App\Models\User::where('email', $request->email)->where('role', 'merchant')->first();
+    
+    if (!$user) {
+        return response()->json(['status' => false, 'message' => 'Merchant not found'], 404);
+    }
+    
+    $company = $user->company_id ? App\Models\MerchantCompany::find($user->company_id) : null;
+    
+    return response()->json([
+        'status' => true,
+        'data' => [
+            'email' => $user->email,
+            'name' => $user->first_name . ' ' . $user->last_name,
+            'approval_status' => $company ? $company->approval_status : 'pending',
+            'is_active' => $company ? $company->is_active : 0,
+        ]
+    ]);
+});
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/user/{id}', [AuthController::class, 'show']);
 
@@ -41,6 +64,8 @@ Route::get('/parcels/{id}', [ParcelController::class, 'show']);
 Route::put('/parcels/{id}', [ParcelController::class, 'update']);
 Route::delete('/parcels/{id}', [ParcelController::class, 'destroy']);
 Route::post('/verify-delivery', [ParcelController::class, 'verifyDelivery']);
+Route::get('/merchant/{merchantId}/parcels', [ParcelController::class, 'getMerchantParcels']);
+Route::post('/merchant/request-delivery', [ParcelController::class, 'requestDelivery']);
 
 // User Management
 Route::get('/riders', [UserController::class, 'getAllRiders']);
@@ -50,9 +75,29 @@ Route::put('/riders/{id}', [UserController::class, 'updateRider']);
 Route::delete('/riders/{id}', [UserController::class, 'deleteRider']);
 Route::get('/riders/{id}/parcels', [RiderController::class, 'parcels']);
 Route::get('/merchants', [UserController::class, 'getAllMerchants']);
+Route::get('/merchants/{id}', [UserController::class, 'getMerchant']);
 Route::post('/merchants', [UserController::class, 'createMerchant']);
 Route::put('/merchants/{id}', [UserController::class, 'updateMerchant']);
 Route::delete('/merchants/{id}', [UserController::class, 'deleteMerchant']);
+
+// Merchant Approval Routes
+Route::post('/merchants/{id}/approve', function($id) {
+    $merchant = App\Models\User::find($id);
+    if ($merchant && $merchant->company_id) {
+        DB::table('merchant_companies')->where('id', $merchant->company_id)->update(['approval_status' => 'approved', 'is_active' => 1]);
+        return response()->json(['message' => 'Merchant approved successfully']);
+    }
+    return response()->json(['message' => 'Merchant not found'], 404);
+});
+
+Route::post('/merchants/{id}/reject', function($id) {
+    $merchant = App\Models\User::find($id);
+    if ($merchant && $merchant->company_id) {
+        DB::table('merchant_companies')->where('id', $merchant->company_id)->update(['approval_status' => 'rejected', 'is_active' => 0]);
+        return response()->json(['message' => 'Merchant rejected successfully']);
+    }
+    return response()->json(['message' => 'Merchant not found'], 404);
+});
 
 // REAL AI MACHINE LEARNING RIDER ASSIGNMENT
 Route::post('/auto-assign-pending', function() {
