@@ -113,6 +113,16 @@ class AuthController extends Controller
             ], 401);
         }
 
+        // Check if merchant is approved
+        if ($user->role === 'merchant' && $user->company) {
+            if ($user->company->approval_status !== 'approved') {
+                return response()->json([
+                    'message' => 'Your account is ' . $user->company->approval_status . '. Please wait for admin approval.',
+                    'approval_status' => $user->company->approval_status
+                ], 403);
+            }
+        }
+
         $token = $user->createToken('API Token')->plainTextToken;
 
         return response()->json([
@@ -131,7 +141,8 @@ class AuthController extends Controller
             ],
             'company_info' => $user->company ? [
                 'company_name' => $user->company->company_name,
-                'per_parcel_rate' => $user->company->per_parcel_rate
+                'per_parcel_rate' => $user->company->per_parcel_rate,
+                'approval_status' => $user->company->approval_status
             ] : null,
             'token' => $token
         ]);
