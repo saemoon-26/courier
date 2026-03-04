@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\Address;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class UserController extends Controller
@@ -20,9 +21,10 @@ class UserController extends Controller
             ->get();
         
         $ridersData = $riders->map(function($rider) {
-            // Count ALL parcels regardless of status
-            // Get registration data if exists
-            $registration = \App\Models\RiderRegistration::where('email', $rider->email)->first();
+            // Get rider data from new normalized structure
+            $riderData = \App\Models\Rider::where('user_id', $rider->id)
+                ->with(['vehicle', 'bank'])
+                ->first();
             
             // Debug for rider ID 42
             if ($rider->id == 42) {
@@ -68,17 +70,28 @@ class UserController extends Controller
                 'is_available' => $assignedParcels < 5,
                 'workload_status' => $assignedParcels >= 5 ? 'busy' : ($assignedParcels >= 3 ? 'moderate' : 'light'),
                 'address' => $rider->address,
-                'registration_data' => $registration ? [
-                    'full_name' => $registration->full_name,
-                    'father_name' => $registration->father_name,
-                    'cnic_number' => $registration->cnic_number,
-                    'vehicle_type' => $registration->vehicle_type,
-                    'vehicle_brand' => $registration->vehicle_brand,
-                    'vehicle_model' => $registration->vehicle_model,
-                    'vehicle_registration' => $registration->vehicle_registration,
-                    'bank_name' => $registration->bank_name,
-                    'account_number' => $registration->account_number,
-                    'registration_status' => $registration->status
+                // Direct fields for easy frontend access
+                'father_name' => $riderData ? ($riderData->father_name ?? 'N/A') : 'N/A',
+                'cnic_number' => $riderData ? ($riderData->cnic_number ?? 'N/A') : 'N/A',
+                'mobile_primary' => $riderData ? ($riderData->mobile_primary ?? 'N/A') : 'N/A',
+                'mobile_alternate' => $riderData ? ($riderData->mobile_alternate ?? null) : null,
+                'driving_license_number' => $riderData ? ($riderData->driving_license_number ?? 'N/A') : 'N/A',
+                'vehicle_type' => ($riderData && $riderData->vehicle) ? ($riderData->vehicle->vehicle_type ?? 'N/A') : 'N/A',
+                'vehicle_brand' => ($riderData && $riderData->vehicle) ? ($riderData->vehicle->vehicle_brand ?? 'N/A') : 'N/A',
+                'vehicle_model' => ($riderData && $riderData->vehicle) ? ($riderData->vehicle->vehicle_model ?? 'N/A') : 'N/A',
+                'vehicle_registration' => ($riderData && $riderData->vehicle) ? ($riderData->vehicle->vehicle_registration ?? null) : null,
+                'bank_name' => ($riderData && $riderData->bank) ? ($riderData->bank->bank_name ?? 'N/A') : 'N/A',
+                'account_title' => ($riderData && $riderData->bank) ? ($riderData->bank->account_title ?? 'N/A') : 'N/A',
+                'registration_data' => $riderData ? [
+                    'full_name' => $rider->first_name . ' ' . $rider->last_name,
+                    'father_name' => $riderData->father_name ?? 'N/A',
+                    'cnic_number' => $riderData->cnic_number ?? 'N/A',
+                    'mobile_primary' => $riderData->mobile_primary ?? 'N/A',
+                    'vehicle_type' => $riderData->vehicle ? ($riderData->vehicle->vehicle_type ?? 'N/A') : 'N/A',
+                    'vehicle_brand' => $riderData->vehicle ? ($riderData->vehicle->vehicle_brand ?? 'N/A') : 'N/A',
+                    'vehicle_model' => $riderData->vehicle ? ($riderData->vehicle->vehicle_model ?? 'N/A') : 'N/A',
+                    'bank_name' => $riderData->bank ? ($riderData->bank->bank_name ?? 'N/A') : 'N/A',
+                    'account_title' => $riderData->bank ? ($riderData->bank->account_title ?? 'N/A') : 'N/A',
                 ] : null,
                 'last_updated' => now()->toDateTimeString()
             ];
@@ -171,18 +184,32 @@ class UserController extends Controller
     public function createRider(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:100',
-            'last_name' => 'required|string|max:100',
+            'full_name' => 'required|string|max:255',
+            'father_name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'phone' => 'required|string|max:20',
+            'password' => 'nullable|string|min:6',
+            'mobile_primary' => 'required|string|max:20',
+            'mobile_alternate' => 'nullable|string|max:20',
+            'cnic_number' => 'required|string|max:20|unique:riders,cnic_number',
+            'driving_license_number' => 'required|string|max:50|unique:riders,driving_license_number',
+            'vehicle_type' => 'required|string|max:50',
+            'vehicle_brand' => 'required|string|max:100',
+            'vehicle_model' => 'required|string|max:100',
+            'vehicle_registration' => 'nullable|string|max:50',
             'city' => 'required|string|max:100',
-            'address' => 'required|string',
-            'country' => 'required|string|max:100',
             'state' => 'required|string|max:100',
-            'zipcode' => 'required|string|max:20',
-            'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-            'id_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
-            'license_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            'address' => 'required|string|max:1000',
+            'zipcode' => 'nullable|string|max:20',
+            'bank_name' => 'nullable|string|max:255',
+            'account_number' => 'nullable|string|max:50',
+            'account_title' => 'nullable|string|max:255',
+            'profile_picture' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'cnic_front_image' => 'nullable|image|max:2048',
+            'cnic_back_image' => 'nullable|image|max:2048',
+            'driving_license_image' => 'nullable|image|max:2048',
+            'vehicle_registration_book' => 'nullable|file|max:5120',
+            'vehicle_image' => 'nullable|image|max:2048',
+            'electricity_bill' => 'nullable|file|max:5120',
         ]);
 
         if ($validator->fails()) {
@@ -195,47 +222,88 @@ class UserController extends Controller
         DB::beginTransaction();
         try {
             // Handle file uploads
-            $profileImagePath = null;
-            $idDocumentPath = null;
-            $licenseDocumentPath = null;
-
-            if ($request->hasFile('profile_image')) {
-                $profileImagePath = $request->file('profile_image')->store('riders/profiles', 'public');
+            $fileFields = [
+                'profile_picture', 'cnic_front_image', 'cnic_back_image',
+                'driving_license_image', 'vehicle_registration_book', 'vehicle_image', 'electricity_bill'
+            ];
+            $uploadedFiles = [];
+            foreach ($fileFields as $field) {
+                if ($request->hasFile($field)) {
+                    $uploadedFiles[$field] = $request->file($field)->store('riders/registrations', 'public');
+                }
             }
 
-            if ($request->hasFile('id_document')) {
-                $idDocumentPath = $request->file('id_document')->store('riders/documents', 'public');
-            }
-
-            if ($request->hasFile('license_document')) {
-                $licenseDocumentPath = $request->file('license_document')->store('riders/documents', 'public');
-            }
-
-            // Create user
-            $user = User::create([
-                'first_name' => $request->first_name,
-                'last_name' => $request->last_name,
-                'email' => $request->email,
-                'phone' => $request->phone,
-                'password' => Hash::make('password123'),
-                'role' => 'rider',
-                'profile_image' => $profileImagePath,
-                'id_document' => $idDocumentPath,
-                'license_document' => $licenseDocumentPath,
+            // Create Address
+            $address = Address::create([
+                'address' => $request->address,
+                'city' => $request->city,
+                'state' => $request->state,
+                'country' => 'Pakistan',
+                'zipcode' => $request->zipcode
             ]);
 
-            // Create address (skip for now due to missing columns)
-            // $address = Address::create([
-            //     'user_id' => $user->id,
-            //     'city' => $request->city,
-            //     'address' => $request->address,
-            //     'country' => $request->country,
-            //     'state' => $request->state,
-            //     'zipcode' => $request->zipcode,
-            // ]);
+            // Create User
+            $user = User::create([
+                'first_name' => explode(' ', $request->full_name)[0],
+                'last_name' => trim(str_replace(explode(' ', $request->full_name)[0], '', $request->full_name)),
+                'email' => $request->email,
+                'password' => Hash::make($request->password ?? 'password123'),
+                'role' => 'rider',
+                'address_id' => $address->id,
+                'status' => 'active'
+            ]);
 
-            // $user->address_id = $address->id;
-            // $user->save();
+            // Update address with user_id
+            $address->user_id = $user->id;
+            $address->save();
+
+            // Create Rider
+            $rider = \App\Models\Rider::create([
+                'user_id' => $user->id,
+                'father_name' => $request->father_name ?? 'N/A',
+                'mobile_primary' => $request->mobile_primary,
+                'mobile_alternate' => $request->mobile_alternate ?? null,
+                'cnic_number' => $request->cnic_number,
+                'driving_license_number' => $request->driving_license_number
+            ]);
+
+            // Create Vehicle
+            \App\Models\RiderVehicle::create([
+                'rider_id' => $rider->id,
+                'vehicle_type' => $request->vehicle_type,
+                'vehicle_brand' => $request->vehicle_brand ?? 'N/A',
+                'vehicle_model' => $request->vehicle_model ?? 'N/A',
+                'vehicle_registration' => $request->vehicle_registration ?? null
+            ]);
+
+            // Create Bank (if provided)
+            if ($request->bank_name) {
+                \App\Models\RiderBank::create([
+                    'rider_id' => $rider->id,
+                    'bank_name' => $request->bank_name,
+                    'account_number' => $request->account_number,
+                    'account_title' => $request->account_title
+                ]);
+            }
+
+            // Create Documents
+            $documentMapping = [
+                'profile_picture' => 'profile_picture',
+                'cnic_front_image' => 'cnic_front',
+                'cnic_back_image' => 'cnic_back',
+                'driving_license_image' => 'driving_license',
+                'vehicle_registration_book' => 'vehicle_registration_book',
+                'vehicle_image' => 'vehicle_image',
+                'electricity_bill' => 'electricity_bill'
+            ];
+            foreach ($uploadedFiles as $field => $path) {
+                \App\Models\RiderDocument::create([
+                    'rider_id' => $rider->id,
+                    'document_type' => $documentMapping[$field],
+                    'document_path' => $path,
+                    'status' => 'approved'
+                ]);
+            }
 
             DB::commit();
 
@@ -243,16 +311,9 @@ class UserController extends Controller
                 'status' => true,
                 'message' => 'Rider registered successfully',
                 'data' => [
-                    'id' => $user->id,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'email' => $user->email,
-                    'phone' => $user->phone,
-                    'role' => $user->role,
-                    'profile_image' => $profileImagePath ? asset('storage/' . $profileImagePath) : null,
-                    'id_document' => $idDocumentPath ? asset('storage/' . $idDocumentPath) : null,
-                    'license_document' => $licenseDocumentPath ? asset('storage/' . $licenseDocumentPath) : null,
-                    'address' => $address
+                    'id' => $rider->id,
+                    'user_id' => $user->id,
+                    'email' => $user->email
                 ]
             ], 201);
 
@@ -488,26 +549,68 @@ class UserController extends Controller
     public function updateRider(Request $request, $id)
     {
         $validator = Validator::make($request->all(), [
-            'first_name' => 'string|max:100',
-            'last_name' => 'string|max:100',
-            'email' => 'email|unique:users,email,' . $id,
-            'per_parcel_payout' => 'numeric|min:0',
-            'city' => 'string|max:100',
-            'address' => 'string',
-            'country' => 'string|max:100',
-            'state' => 'string|max:100',
-            'zipcode' => 'string|max:20',
+            'first_name' => 'nullable|string|max:100',
+            'last_name' => 'nullable|string|max:100',
+            'email' => 'nullable|email|unique:users,email,' . $id,
+            'per_parcel_payout' => 'nullable|numeric|min:0',
+            'father_name' => 'nullable|string|max:255',
+            'cnic_number' => 'nullable|string|max:20',
+            'mobile_primary' => 'nullable|string|max:20',
+            'mobile_alternate' => 'nullable|string|max:20',
+            'driving_license_number' => 'nullable|string|max:50',
+            'vehicle_type' => 'nullable|string|max:50',
+            'vehicle_brand' => 'nullable|string|max:100',
+            'vehicle_model' => 'nullable|string|max:100',
+            'vehicle_registration' => 'nullable|string|max:50',
+            'city' => 'nullable|string|max:100',
+            'address' => 'nullable|string',
+            'country' => 'nullable|string|max:100',
+            'state' => 'nullable|string|max:100',
+            'zipcode' => 'nullable|string|max:20',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['status' => false, 'errors' => $validator->errors()], 422);
         }
 
+        DB::beginTransaction();
         try {
-            $rider = User::where('role', 'rider')->findOrFail($id);
+            $user = User::where('role', 'rider')->findOrFail($id);
             
             // Update user fields
-            $rider->update($request->only(['first_name', 'last_name', 'email', 'per_parcel_payout']));
+            $user->update($request->only(['first_name', 'last_name', 'email', 'per_parcel_payout']));
+
+            // Update rider table
+            $riderData = \App\Models\Rider::where('user_id', $id)->first();
+            if ($riderData) {
+                $riderData->update($request->only([
+                    'father_name',
+                    'cnic_number',
+                    'mobile_primary',
+                    'mobile_alternate',
+                    'driving_license_number'
+                ]));
+
+                // Update vehicle information - check if vehicle exists first
+                $vehicle = \App\Models\RiderVehicle::where('rider_id', $riderData->id)->first();
+                if ($vehicle && $request->hasAny(['vehicle_type', 'vehicle_brand', 'vehicle_model', 'vehicle_registration'])) {
+                    $vehicle->update($request->only([
+                        'vehicle_type',
+                        'vehicle_brand',
+                        'vehicle_model',
+                        'vehicle_registration'
+                    ]));
+                } elseif (!$vehicle && $request->hasAny(['vehicle_type', 'vehicle_brand', 'vehicle_model', 'vehicle_registration'])) {
+                    // Create vehicle if it doesn't exist but vehicle data is provided
+                    \App\Models\RiderVehicle::create([
+                        'rider_id' => $riderData->id,
+                        'vehicle_type' => $request->vehicle_type,
+                        'vehicle_brand' => $request->vehicle_brand,
+                        'vehicle_model' => $request->vehicle_model,
+                        'vehicle_registration' => $request->vehicle_registration
+                    ]);
+                }
+            }
 
             // Update address if data provided
             if ($request->hasAny(['city', 'address', 'country', 'state', 'zipcode'])) {
@@ -515,23 +618,31 @@ class UserController extends Controller
                     ->update($request->only(['city', 'address', 'country', 'state', 'zipcode']));
             }
 
+            DB::commit();
+
             // Reload rider with fresh data
-            $rider = User::find($id);
-            $address = Address::where('user_id', $rider->id)->first();
+            $user = User::find($id);
+            $address = Address::where('user_id', $user->id)->first();
 
             return response()->json([
                 'status' => true,
                 'message' => 'Rider updated successfully',
                 'data' => [
-                    'id' => $rider->id,
-                    'first_name' => $rider->first_name,
-                    'last_name' => $rider->last_name,
-                    'email' => $rider->email,
-                    'per_parcel_payout' => $rider->per_parcel_payout,
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'per_parcel_payout' => $user->per_parcel_payout,
                     'address' => $address
                 ]
             ]);
         } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Failed to update rider', [
+                'rider_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json(['status' => false, 'message' => 'Failed to update rider: ' . $e->getMessage()], 500);
         }
     }

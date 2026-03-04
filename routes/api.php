@@ -14,9 +14,6 @@ use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\AdminDashboardController;
 
-// Debug route
-require __DIR__.'/debug.php';
-
 // Rider Registration routes
 Route::post('/rider-registrations', [RiderRegistrationController::class, 'store']);
 Route::get('/rider-registrations', [RiderRegistrationController::class, 'index']);
@@ -63,6 +60,84 @@ Route::get('/test-geocode', function() {
         'result' => $result,
         'status' => 'working'
     ]);
+});
+
+// Test rider update endpoint with actual update
+Route::put('/test-rider-update/{id}', function($id, \Illuminate\Http\Request $request) {
+    try {
+        $user = \App\Models\User::where('role', 'rider')->findOrFail($id);
+        
+        // Update user fields
+        $user->update($request->only(['first_name', 'last_name', 'email', 'per_parcel_payout']));
+
+        // Update rider table
+        $riderData = \App\Models\Rider::where('user_id', $id)->first();
+        if ($riderData) {
+            $riderData->update($request->only([
+                'father_name',
+                'cnic_number',
+                'mobile_primary',
+                'mobile_alternate',
+                'driving_license_number'
+            ]));
+
+            // Update vehicle information - check if vehicle exists first
+            $vehicle = \App\Models\RiderVehicle::where('rider_id', $riderData->id)->first();
+            if ($vehicle && $request->hasAny(['vehicle_type', 'vehicle_brand', 'vehicle_model', 'vehicle_registration'])) {
+                $vehicle->update($request->only([
+                    'vehicle_type',
+                    'vehicle_brand',
+                    'vehicle_model',
+                    'vehicle_registration'
+                ]));
+            }
+        }
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Rider updated successfully',
+            'data' => [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+                'email' => $user->email
+            ]
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
+});
+
+// Test rider update endpoint
+Route::post('/test-rider-update/{id}', function($id) {
+    try {
+        $rider = \App\Models\User::where('role', 'rider')->find($id);
+        if (!$rider) {
+            return response()->json(['error' => 'Rider not found'], 404);
+        }
+        
+        $riderData = \App\Models\Rider::where('user_id', $id)->first();
+        $vehicle = null;
+        if ($riderData) {
+            $vehicle = \App\Models\RiderVehicle::where('rider_id', $riderData->id)->first();
+        }
+        
+        return response()->json([
+            'rider_found' => true,
+            'rider_data_exists' => $riderData ? true : false,
+            'vehicle_exists' => $vehicle ? true : false,
+            'rider_id' => $id,
+            'rider_name' => $rider->first_name . ' ' . $rider->last_name
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
 });
 
 // Test simple endpoint

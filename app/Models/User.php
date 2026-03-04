@@ -5,7 +5,7 @@ namespace App\Models;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class User extends Authenticatable
 {
@@ -28,9 +28,9 @@ class User extends Authenticatable
     // Auto-load address relation when needed
     // protected $with = ['address'];
 
-    public function address(): HasOne
+    public function address(): BelongsTo
     {
-        return $this->hasOne(Address::class)->withDefault();
+        return $this->belongsTo(Address::class, 'address_id');
     }
 
     public function parcels()
