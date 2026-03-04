@@ -9,15 +9,16 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('rider_registrations', function (Blueprint $table) {
-            $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending')->after('state');
-            $table->text('rejection_reason')->nullable()->after('status');
+            if (!Schema::hasColumn('rider_registrations', 'rejection_reason')) {
+                $table->text('rejection_reason')->nullable()->after('status');
+            }
         });
     }
 
     public function down(): void
     {
         Schema::table('rider_registrations', function (Blueprint $table) {
-            $table->dropColumn(['status', 'rejection_reason']);
+            $table->dropColumn('rejection_reason');
         });
     }
 };

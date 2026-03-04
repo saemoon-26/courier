@@ -10,7 +10,7 @@ class Address extends Model
     protected $table = 'address';
 
     protected $fillable = [
-        'user_id', 'city', 'address', 'country', 'state', 'zipcode', 'latitude', 'longitude', 'zone',
+        'user_id', 'city', 'address', 'country', 'state', 'zipcode',
     ];
 
     public function user(): BelongsTo
