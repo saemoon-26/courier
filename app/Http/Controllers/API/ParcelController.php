@@ -136,19 +136,23 @@ class ParcelController extends Controller
         DB::commit();
 
         // 🤖 AI Auto-Assignment after parcel creation
-        // \Log::info('Checking AI assignment for parcel: ' . $parcel->parcel_id . ', assigned_to: ' . ($assigned_to ?? 'null'));
-        
-        // if (!$assigned_to) {
-        //     \Log::info('Calling AI service for parcel: ' . $parcel->parcel_id);
-        //     $aiService = new \App\Services\AIOnlyRiderAssignmentService();
-        //     $aiResult = $aiService->assignParcels();
-        //     \Log::info('AI Result: ' . json_encode($aiResult));
-        //     
-        //     // Refresh parcel to get updated assigned_to
-        //     $parcel->refresh();
-        //     $assigned_to = $parcel->assigned_to;
-        //     \Log::info('After refresh, assigned_to: ' . ($assigned_to ?? 'null'));
-        // }
+        if (!$assigned_to) {
+            try {
+                $pythonScript = base_path('ai_rider_assignment.py');
+                $pythonPath = 'C:\\Program Files\\Python313\\python.exe';
+                $command = "\"{$pythonPath}\" \"{$pythonScript}\" 2>&1";
+                
+                \Log::info('Running AI Assignment: ' . $command);
+                $output = shell_exec($command);
+                \Log::info('AI Assignment Output: ' . $output);
+                
+                // Refresh parcel to get updated assigned_to
+                $parcel = $parcel->fresh();
+                $assigned_to = $parcel->assigned_to;
+            } catch (\Exception $e) {
+                \Log::error('AI Assignment Error: ' . $e->getMessage());
+            }
+        }
 
         // ✅ Send Email verification code to client
         $emailStatus = 'not_sent';

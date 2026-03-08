@@ -17,6 +17,7 @@ class UserController extends Controller
     public function getAllRiders()
     {
         $riders = User::where('role', 'rider')
+            ->where('status', 'active')
             ->with(['address'])
             ->get();
         
