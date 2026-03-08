@@ -9,7 +9,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('merchant_companies', function (Blueprint $table) {
-            $table->timestamps();
+            if (!Schema::hasColumn('merchant_companies', 'created_at')) {
+                $table->timestamps();
+            }
         });
     }
 
