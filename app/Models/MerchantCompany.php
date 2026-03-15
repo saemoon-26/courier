@@ -10,6 +10,7 @@ class MerchantCompany extends Model
     use HasFactory;
 
     protected $fillable = [
+        'user_id',
         'company_name',
         'address',
         'per_parcel_rate',

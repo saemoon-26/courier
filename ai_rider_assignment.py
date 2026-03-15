@@ -32,10 +32,7 @@ class RealAIRiderAssignment:
             SELECT p.parcel_id, p.pickup_city, p.pickup_location, pd.client_address
             FROM parcel p
             LEFT JOIN parcel_details pd ON p.parcel_id = pd.parcel_id
-            WHERE p.assigned_to IS NULL 
-                AND p.parcel_status = 'pending'
-                AND p.pickup_city IS NOT NULL
-                AND p.pickup_city != ''
+            WHERE p.assigned_to IS NULL AND p.parcel_status = 'pending'
         """)
         parcels = cursor.fetchall()
         
@@ -44,7 +41,7 @@ class RealAIRiderAssignment:
             if parcel['pickup_city']:
                 parcel['pickup_city'] = parcel['pickup_city'].lower().strip()
         
-        # Get available riders (MAX 5 PARCELS PER RIDER + APPROVED ONLY)
+        # Get available riders
         cursor.execute("""
             SELECT u.id, u.first_name, u.last_name, u.rating, 
                    a.city, a.address,
@@ -52,12 +49,9 @@ class RealAIRiderAssignment:
             FROM users u
             JOIN address a ON u.id = a.user_id
             LEFT JOIN parcel p ON u.id = p.assigned_to
-            WHERE u.role = 'rider' 
-                AND u.status = 'active'
-                AND a.city IS NOT NULL
-                AND a.city != ''
+            WHERE u.role = 'rider'
             GROUP BY u.id, u.first_name, u.last_name, u.rating, a.city, a.address
-            HAVING active_parcels < 5
+            HAVING active_parcels <= 5
         """)
         riders = cursor.fetchall()
         
@@ -139,15 +133,11 @@ class RealAIRiderAssignment:
         # Normalize parcel city
         parcel_city = parcel['pickup_city'].lower().strip() if parcel['pickup_city'] else ''
         
-        # Filter riders by same city AND under 5 parcels limit
-        city_riders = [
-            r for r in riders 
-            if r['city'].lower().strip() == parcel_city 
-            and r['active_parcels'] < 5
-        ]
+        # Filter riders by same city first (STRICT REQUIREMENT)
+        city_riders = [r for r in riders if r['city'].lower().strip() == parcel_city]
         
         if not city_riders:
-            return None  # N/A - no riders available (same city + under limit)
+            return None  # N/A - no riders in same city
         
         # Calculate ML scores for each rider
         rider_scores = []
@@ -190,7 +180,7 @@ class RealAIRiderAssignment:
         for parcel in parcels:
             best_rider = self.predict_best_rider(parcel, riders)
             
-            if best_rider and best_rider['active_parcels'] < 5:
+            if best_rider:
                 # Assign parcel to rider
                 cursor.execute(
                     "UPDATE parcel SET assigned_to = %s WHERE parcel_id = %s",
@@ -198,13 +188,10 @@ class RealAIRiderAssignment:
                 )
                 assigned += 1
                 
-                # Update rider's active parcels count (enforce 5 limit)
+                # Update rider's active parcels count
                 for rider in riders:
                     if rider['id'] == best_rider['id']:
                         rider['active_parcels'] += 1
-                        # Remove rider from pool if reached limit
-                        if rider['active_parcels'] >= 5:
-                            riders.remove(rider)
                         break
         
         conn.commit()

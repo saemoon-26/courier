@@ -57,6 +57,7 @@ Route::get('/user/{id}', [AuthController::class, 'show']);
 
 // Parcel Management
 Route::get('/parcels', [ParcelController::class, 'getAllParcels']);
+Route::get('/generate-tracking-code', [ParcelController::class, 'generateTrackingCode']);
 Route::get('/parcels/track/{trackingCode}', [ParcelController::class, 'getByTrackingCode']);
 Route::post('/parcels', [ParcelController::class, 'store']);
 Route::get('/parcels/{id}', [ParcelController::class, 'show']);

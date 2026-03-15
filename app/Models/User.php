@@ -22,7 +22,6 @@ class User extends Authenticatable
         'address_id',
         'company_id',
         'per_parcel_payout',
-        'rating',
         'status',
     ];
 
