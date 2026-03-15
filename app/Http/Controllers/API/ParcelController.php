@@ -16,6 +16,17 @@ use App\Mail\DeliveryRequestMail;
 
 class ParcelController extends Controller
 {
+    // ✅ Generate unique tracking code
+    public function generateTrackingCode()
+    {
+        $trackingCode = 'TRK-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
+        
+        return response()->json([
+            'status' => true,
+            'tracking_code' => $trackingCode
+        ]);
+    }
+
     // ✅ GET: All Parcels with client details
     public function getAllParcels()
     {
@@ -53,13 +64,12 @@ class ParcelController extends Controller
     // Validation
     $validator = Validator::make($request->all(), [
         'tracking_code' => 'nullable|unique:parcel,tracking_code',
+        'merchant_id' => 'nullable|integer|exists:users,id',
         'assigned_to' => 'nullable|integer|exists:users,id',
         'pickup_location' => 'required|string',
         'pickup_city' => 'required|string',
-       
-        
         'dropoff_city' => 'nullable|string',
-        'parcel_status' => 'nullable|in:pending,in_transit,delivered,cancelled,picked_up,out_for_delivery',
+        'parcel_status' => 'nullable|in:pending,pickup_requested,picked_up,out_for_delivery,delivered,cancelled',
         'payment_method' => 'required|in:cod,online',
         'rider_payout' => 'nullable|numeric|min:0',
         'company_payout' => 'nullable|numeric|min:0',
@@ -78,10 +88,11 @@ class ParcelController extends Controller
         ], 422);
     }
 
-    // Get merchant_id from selected company
-    $merchant_id = null;
-    if ($request->company_id) {
-        // Find the user who owns this company
+    // Get merchant_id from request
+    $merchant_id = $request->merchant_id ?? null;
+    
+    // If company_id is provided instead, find merchant by company
+    if (!$merchant_id && $request->company_id) {
         $merchant = \App\Models\User::where('company_id', $request->company_id)->first();
         $merchant_id = $merchant ? $merchant->id : null;
     }
@@ -110,19 +121,13 @@ class ParcelController extends Controller
             'company_payout' => $company_payout,
         ]);
 
-        // ✅ Geocode client address and save coordinates
-        $geocodingService = new \App\Services\GeocodingService();
-        $coords = $geocodingService->geocodeAddress($request->client_address);
-        
-        // ✅ Parcel details create with coordinates
+        // ✅ Parcel details create
         ParcelDetail::create([
             'parcel_id' => $parcel->parcel_id,
             'client_name' => $request->client_name,
             'client_phone_number' => $request->client_phone_number,
             'client_address' => $request->client_address,
             'client_email' => $request->client_email,
-            'delivery_latitude' => $coords['latitude'] ?? null,
-            'delivery_longitude' => $coords['longitude'] ?? null,
         ]);
 
         // ✅ Generate and save 4-digit code for the parcel
@@ -327,7 +332,7 @@ public function update(Request $request, $id)
         'pickup_city' => 'string',
         'dropoff_location' => 'string',
         'dropoff_city' => 'nullable|string',
-        'parcel_status' => 'in:pending,in_transit,delivered,cancelled,picked_up,out_for_delivery',
+        'parcel_status' => 'in:pending,pickup_requested,picked_up,out_for_delivery,delivered,cancelled',
         'payment_method' => 'in:cod,online',
         'rider_payout' => 'nullable|numeric|min:0',
         'collected_by_rider' => 'nullable|numeric|min:0',

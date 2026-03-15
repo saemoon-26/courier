@@ -41,6 +41,7 @@ class MerchantRegistrationController extends Controller
 
         // Create merchant company
         $company = MerchantCompany::create([
+            'user_id' => $user->id,
             'company_name' => $request->business_name,
             'address' => $request->full_address,
             'per_parcel_rate' => $request->avg_parcels_per_day ?? 0,
