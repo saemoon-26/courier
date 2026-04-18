@@ -9,7 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('parcel', function (Blueprint $table) {
-            $table->dropColumn(['dropoff_location', 'dropoff_city', 'pickup_lat', 'pickup_lng', 'zone']);
+            // Only remove dropoff columns, keep pickup coordinates
+            $table->dropColumn(['dropoff_location', 'dropoff_city', 'zone']);
         });
     }
 
@@ -18,8 +19,6 @@ return new class extends Migration
         Schema::table('parcel', function (Blueprint $table) {
             $table->string('dropoff_location')->nullable();
             $table->string('dropoff_city')->nullable();
-            $table->decimal('pickup_lat', 10, 8)->nullable();
-            $table->decimal('pickup_lng', 11, 8)->nullable();
             $table->string('zone')->nullable();
         });
     }

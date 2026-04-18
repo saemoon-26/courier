@@ -7,6 +7,9 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics.pairwise import cosine_similarity
 import warnings
+import math
+import requests
+import time
 warnings.filterwarnings('ignore')
 
 class RealAIRiderAssignment:
@@ -27,35 +30,36 @@ class RealAIRiderAssignment:
         conn = self.connect_db()
         cursor = conn.cursor(dictionary=True)
         
-        # Get pending parcels with client address
+        # Get pending parcels with coordinates (cached in DB)
         cursor.execute("""
-            SELECT p.parcel_id, p.pickup_city, p.pickup_location, pd.client_address
+            SELECT p.parcel_id, p.pickup_city, p.pickup_location, p.pickup_lat, p.pickup_lng,
+                   pd.client_address, pd.client_latitude, pd.client_longitude
             FROM parcel p
             LEFT JOIN parcel_details pd ON p.parcel_id = pd.parcel_id
             WHERE p.assigned_to IS NULL AND p.parcel_status = 'pending'
         """)
         parcels = cursor.fetchall()
         
-        # Normalize city names to lowercase
+        # Normalize city names
         for parcel in parcels:
             if parcel['pickup_city']:
                 parcel['pickup_city'] = parcel['pickup_city'].lower().strip()
         
-        # Get available riders
+        # Get available riders with coordinates (cached in DB)
         cursor.execute("""
-            SELECT u.id, u.first_name, u.last_name, u.rating, 
-                   a.city, a.address,
+            SELECT u.id, u.first_name, u.last_name, 
+                   a.city, a.address, a.latitude, a.longitude,
                    COUNT(CASE WHEN p.parcel_status IN ('pending', 'picked_up', 'in_transit', 'out_for_delivery') THEN 1 END) as active_parcels
             FROM users u
-            JOIN address a ON u.id = a.user_id
+            JOIN address a ON u.address_id = a.id
             LEFT JOIN parcel p ON u.id = p.assigned_to
-            WHERE u.role = 'rider'
-            GROUP BY u.id, u.first_name, u.last_name, u.rating, a.city, a.address
-            HAVING active_parcels <= 5
+            WHERE u.role = 'rider' AND u.status = 'active'
+            GROUP BY u.id, u.first_name, u.last_name, a.city, a.address, a.latitude, a.longitude
+            HAVING active_parcels < 5
         """)
         riders = cursor.fetchall()
         
-        # Normalize city names to lowercase
+        # Normalize city names
         for rider in riders:
             if rider['city']:
                 rider['city'] = rider['city'].lower().strip()
@@ -64,11 +68,11 @@ class RealAIRiderAssignment:
         cursor.execute("""
             SELECT p.pickup_city, p.pickup_location,
                    u.id as rider_id, a.city as rider_city, a.address as rider_address,
-                   u.rating, p.parcel_status,
+                   p.parcel_status,
                    CASE WHEN p.parcel_status = 'delivered' THEN 1 ELSE 0 END as success
             FROM parcel p
             JOIN users u ON p.assigned_to = u.id
-            JOIN address a ON u.id = a.user_id
+            JOIN address a ON u.address_id = a.id
             WHERE p.assigned_to IS NOT NULL
             LIMIT 1000
         """)
@@ -77,27 +81,115 @@ class RealAIRiderAssignment:
         conn.close()
         return parcels, riders, training_data
     
-    def calculate_distance_score(self, pickup_location, rider_address):
-        """AI-based text similarity for location matching"""
-        pickup_words = set(pickup_location.lower().split())
-        rider_words = set(rider_address.lower().split())
+    def geocode_address(self, address, city):
+        """Get GPS coordinates from address using Nominatim with fallback"""
+        # Try multiple search strategies
+        search_queries = [
+            f"{address}, {city}, Pakistan",
+            f"{address} {city} Pakistan",
+            f"{city}, {address}, Pakistan",
+            f"{city} Pakistan"  # Fallback to city center
+        ]
         
-        if not pickup_words or not rider_words:
+        for query in search_queries:
+            try:
+                url = "https://nominatim.openstreetmap.org/search"
+                params = {
+                    'q': query,
+                    'format': 'json',
+                    'limit': 1,
+                    'countrycodes': 'pk'
+                }
+                headers = {'User-Agent': 'CourierApp/1.0'}
+                
+                time.sleep(1.2)  # Rate limit
+                response = requests.get(url, params=params, headers=headers, timeout=15)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data and len(data) > 0:
+                        return float(data[0]['lat']), float(data[0]['lon'])
+            except:
+                continue
+        
+        return None, None
+    
+    def haversine_distance(self, lat1, lon1, lat2, lon2):
+        """Calculate actual distance in KM using Haversine formula"""
+        if None in [lat1, lon1, lat2, lon2]:
+            return 999  # Large distance if coordinates missing
+        
+        R = 6371  # Earth radius in KM
+        
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        
+        a = math.sin(delta_lat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        
+        return R * c
+    
+    def calculate_distance_score(self, parcel, rider):
+        """Calculate real GPS distance using cached coordinates"""
+        # Get parcel coordinates (from DB cache or geocode)
+        parcel_lat = parcel.get('pickup_lat')
+        parcel_lon = parcel.get('pickup_lng')
+        
+        # If not cached, geocode and cache
+        if not parcel_lat or not parcel_lon:
+            parcel_lat, parcel_lon = self.geocode_and_cache_parcel(parcel)
+        
+        # Get rider coordinates (from DB cache or geocode)
+        rider_lat = rider.get('latitude')
+        rider_lon = rider.get('longitude')
+        
+        # If not cached, geocode and cache
+        if not rider_lat or not rider_lon:
+            rider_lat, rider_lon = self.geocode_and_cache_rider(rider)
+        
+        # Calculate distance
+        distance_km = self.haversine_distance(parcel_lat, parcel_lon, rider_lat, rider_lon)
+        
+        # Convert to score (closer = higher score)
+        if distance_km is None or distance_km >= 10:
             return 0
         
-        intersection = pickup_words.intersection(rider_words)
-        union = pickup_words.union(rider_words)
+        score = 1 - (distance_km / 10)
+        return max(0, score)
+    
+    def geocode_and_cache_parcel(self, parcel):
+        """Geocode parcel and cache in database"""
+        lat, lon = self.geocode_address(parcel['pickup_location'], parcel['pickup_city'])
         
-        # Jaccard similarity
-        jaccard = len(intersection) / len(union) if union else 0
+        if lat and lon:
+            conn = self.connect_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE parcel SET pickup_lat = %s, pickup_lng = %s WHERE parcel_id = %s",
+                (lat, lon, parcel['parcel_id'])
+            )
+            conn.commit()
+            conn.close()
         
-        # Boost for exact area matches
-        area_boost = 0
-        for word in intersection:
-            if len(word) > 3:  # Meaningful words
-                area_boost += 0.1
+        return lat, lon
+    
+    def geocode_and_cache_rider(self, rider):
+        """Geocode rider address and cache in database"""
+        lat, lon = self.geocode_address(rider['address'], rider['city'])
         
-        return jaccard + area_boost
+        if lat and lon:
+            conn = self.connect_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE address SET latitude = %s, longitude = %s WHERE user_id = (SELECT id FROM users WHERE id = %s LIMIT 1)",
+                (lat, lon, rider['id'])
+            )
+            conn.commit()
+            conn.close()
+        
+        return lat, lon
     
     def train_model(self, training_data):
         """Train ML model on historical data"""
@@ -108,16 +200,14 @@ class RealAIRiderAssignment:
         
         # Feature engineering
         df['distance_score'] = df.apply(
-            lambda row: self.calculate_distance_score(
-                row['pickup_location'], row['rider_address']
-            ), axis=1
+            lambda row: 0.5,  # Placeholder for historical data
+            axis=1
         )
         
         df['city_match'] = (df['pickup_city'] == df['rider_city']).astype(int)
-        df['rating_score'] = df['rating'].fillna(4.0)
         
         # Prepare features
-        features = ['distance_score', 'city_match', 'rating_score']
+        features = ['distance_score', 'city_match']
         X = df[features]
         y = df['success']
         
@@ -133,36 +223,40 @@ class RealAIRiderAssignment:
         # Normalize parcel city
         parcel_city = parcel['pickup_city'].lower().strip() if parcel['pickup_city'] else ''
         
-        # Filter riders by same city first (STRICT REQUIREMENT)
-        city_riders = [r for r in riders if r['city'].lower().strip() == parcel_city]
+        # Filter riders by same city first (STRICT REQUIREMENT) and max 5 parcels
+        city_riders = [r for r in riders if r['city'].lower().strip() == parcel_city and r['active_parcels'] < 5]
         
         if not city_riders:
-            return None  # N/A - no riders in same city
+            return None  # N/A - no riders in same city or all riders have 5 parcels
         
         # Calculate ML scores for each rider
         rider_scores = []
         for rider in city_riders:
-            distance_score = self.calculate_distance_score(
-                parcel['pickup_location'], rider['address']
-            )
+            distance_score = self.calculate_distance_score(parcel, rider)
             
             features = np.array([[
                 distance_score,
-                1,  # city_match = 1 (same city)
-                rider['rating'] or 4.0
+                1  # city_match = 1 (same city)
             ]])
             
             # ML prediction probability
             ml_score = self.model.predict_proba(features)[0][1] if hasattr(self.model, 'predict_proba') else 0.5
             
+            # Combined score: 60% distance + 20% ML + 20% workload
+            # Heavy workload penalty - prefer riders with fewer parcels
+            workload_penalty = rider['active_parcels'] * 0.2  # 20% penalty per parcel
+            combined_score = (distance_score * 0.6) + (ml_score * 0.2) + ((5 - rider['active_parcels']) * 0.04)
+            
             rider_scores.append({
                 'rider': rider,
                 'ml_score': ml_score,
-                'distance_score': distance_score
+                'distance_score': distance_score,
+                'combined_score': combined_score,
+                'active_parcels': rider['active_parcels']
             })
         
-        # Sort by ML score (highest first)
-        rider_scores.sort(key=lambda x: x['ml_score'], reverse=True)
+        # Sort by combined score (highest first)
+        rider_scores.sort(key=lambda x: x['combined_score'], reverse=True)
         
         return rider_scores[0]['rider'] if rider_scores else None
     

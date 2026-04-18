@@ -113,12 +113,33 @@ class AuthController extends Controller
             ], 401);
         }
 
+        // Check if rider is approved
+        if ($user->role === 'rider') {
+            if ($user->status === 'pending') {
+                return response()->json([
+                    'message' => 'Your rider registration is under review. Please wait for admin approval.',
+                    'status' => 'pending'
+                ], 403);
+            } elseif ($user->status === 'rejected') {
+                return response()->json([
+                    'message' => 'Your rider registration was rejected. Please contact support.',
+                    'status' => 'rejected'
+                ], 403);
+            } elseif ($user->status !== 'active') {
+                return response()->json([
+                    'message' => 'Your account status is: ' . $user->status . '. Please contact support.',
+                    'status' => $user->status
+                ], 403);
+            }
+        }
+
         // Check if merchant is approved
         if ($user->role === 'merchant' && $user->company) {
             if ($user->company->approval_status !== 'approved') {
                 return response()->json([
                     'message' => 'Your account is ' . $user->company->approval_status . '. Please wait for admin approval.',
-                    'approval_status' => $user->company->approval_status
+                    'approval_status' => $user->company->approval_status,
+                    'status' => $user->company->approval_status
                 ], 403);
             }
         }
@@ -132,6 +153,7 @@ class AuthController extends Controller
             'last_name' => $user->last_name,
             'email' => $user->email,
             'role' => $user->role,
+            'status' => $user->status ?? 'active',
             'address_details' => [
                 'country' => optional($user->address)->country,
                 'state' => optional($user->address)->state,

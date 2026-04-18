@@ -171,6 +171,34 @@ Route::get('/test', function() {
     return response()->json(['status' => 'API Working', 'time' => now()]);
 });
 
+// Test email endpoint
+Route::get('/test-email', function() {
+    try {
+        $testEmail = request('email', 'test@example.com');
+        
+        Mail::raw('Test email from Courier System - Time: ' . now(), function($message) use ($testEmail) {
+            $message->to($testEmail)
+                    ->subject('Test Email - Courier System');
+        });
+        
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Email sent to ' . $testEmail,
+            'mail_config' => [
+                'mailer' => config('mail.default'),
+                'host' => config('mail.mailers.smtp.host'),
+                'port' => config('mail.mailers.smtp.port'),
+                'from' => config('mail.from.address')
+            ]
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+});
+
 // Geocode address endpoint
 Route::post('/geocode-address', function(\Illuminate\Http\Request $request) {
     $address = $request->input('address');
@@ -272,3 +300,8 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware('auth:rider')->group(function () {
     Route::get('/rider/profile', [RiderAuthController::class, 'profile']);
 });
+
+// Rider Request Management - Accept/Reject Parcels
+Route::get('/rider/{riderId}/pending-requests', [App\Http\Controllers\API\RiderRequestController::class, 'getPendingRequests']);
+Route::post('/rider/request/accept', [App\Http\Controllers\API\RiderRequestController::class, 'acceptRequest']);
+Route::post('/rider/request/reject', [App\Http\Controllers\API\RiderRequestController::class, 'rejectRequest']);
