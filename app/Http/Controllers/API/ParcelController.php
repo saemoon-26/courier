@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\ParcelCodeMail;
 use App\Mail\DeliveryRequestMail;
+use App\Services\Top3RiderService;
 
 class ParcelController extends Controller
 {
@@ -121,6 +122,19 @@ class ParcelController extends Controller
             'company_payout' => $company_payout,
         ]);
 
+        // ✅ Geocode pickup location and cache in DB
+        try {
+            $geocoder = new \App\Services\GeocodingService();
+            $pickupCoords = $geocoder->geocodeAddress($request->pickup_location, $request->pickup_city);
+            if ($pickupCoords) {
+                $parcel->pickup_lat = $pickupCoords['latitude'];
+                $parcel->pickup_lng = $pickupCoords['longitude'];
+                $parcel->save();
+            }
+        } catch (\Exception $e) {
+            \Log::warning('Geocoding failed for pickup: ' . $e->getMessage());
+        }
+
         // ✅ Parcel details create
         ParcelDetail::create([
             'parcel_id' => $parcel->parcel_id,
@@ -130,6 +144,20 @@ class ParcelController extends Controller
             'client_email' => $request->client_email,
         ]);
 
+        // ✅ Geocode client address and cache in DB
+        try {
+            $geocoder = new \App\Services\GeocodingService();
+            $clientCoords = $geocoder->geocodeAddress($request->client_address);
+            if ($clientCoords) {
+                ParcelDetail::where('parcel_id', $parcel->parcel_id)->update([
+                    'client_latitude' => $clientCoords['latitude'],
+                    'client_longitude' => $clientCoords['longitude']
+                ]);
+            }
+        } catch (\Exception $e) {
+            \Log::warning('Geocoding failed for client: ' . $e->getMessage());
+        }
+
         // ✅ Generate and save 4-digit code for the parcel
         $uniqueCode = ParcelCode::generateUniqueCode();
         ParcelCode::create([
@@ -137,25 +165,17 @@ class ParcelController extends Controller
             'code' => $uniqueCode
         ]);
 
-        // Commit transaction first so Python script can see the parcel
         DB::commit();
 
-        // 🤖 AI Auto-Assignment after parcel creation
+        // 🚀 Send request to top 3 riders (using AI logic)
+        $riderRequestResult = ['success' => false, 'riders' => []];
         if (!$assigned_to) {
             try {
-                $pythonScript = base_path('ai_rider_assignment.py');
-                $pythonPath = 'C:\\Program Files\\Python313\\python.exe';
-                $command = "\"{$pythonPath}\" \"{$pythonScript}\" 2>&1";
-                
-                \Log::info('Running AI Assignment: ' . $command);
-                $output = shell_exec($command);
-                \Log::info('AI Assignment Output: ' . $output);
-                
-                // Refresh parcel to get updated assigned_to
-                $parcel = $parcel->fresh();
-                $assigned_to = $parcel->assigned_to;
+                $top3Service = new Top3RiderService();
+                $riderRequestResult = $top3Service->sendRequestToTop3Riders($parcel->parcel_id);
+                \Log::info('Top 3 riders notified', $riderRequestResult);
             } catch (\Exception $e) {
-                \Log::error('AI Assignment Error: ' . $e->getMessage());
+                \Log::error('Rider Request Error: ' . $e->getMessage());
             }
         }
 
@@ -172,21 +192,17 @@ class ParcelController extends Controller
             }
         }
 
-        // Get assigned rider name
-        $assignedRiderName = 'N/A';
-        if ($assigned_to) {
-            $rider = \App\Models\User::find($assigned_to);
-            $assignedRiderName = $rider ? $rider->first_name . ' ' . $rider->last_name : 'N/A';
-        }
-
         return response()->json([
             'status' => true,
-            'message' => $assigned_to ? 'Parcel created and assigned by AI successfully.' : 'Parcel created. No available rider found - marked as N/A.',
+            'message' => $riderRequestResult['success'] 
+                ? 'Parcel created. Request sent to top 3 riders - waiting for acceptance.' 
+                : 'Parcel created. No available riders found in the same city.',
             'parcel_id' => $parcel->parcel_id,
             'tracking_code' => $trackingCode,
-            'assigned_to' => $assigned_to,
-            'assigned_rider_name' => $assignedRiderName,
-            'ai_assignment' => $assigned_to ? 'success' : 'no_rider_available',
+            'assigned_to' => null,
+            'assigned_rider_name' => 'Pending Rider Acceptance',
+            'riders_notified' => $riderRequestResult['riders'] ?? [],
+            'riders_count' => count($riderRequestResult['riders'] ?? []),
             'client_email' => $request->client_email,
             'verification_code' => $uniqueCode,
             'email_status' => $emailStatus

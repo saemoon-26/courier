@@ -19,47 +19,90 @@ class RiderRegistrationController extends Controller
     public function index()
     {
         try {
-            $riders = Rider::with(['user.address', 'vehicle', 'bank', 'documents'])
-                ->get()
-                ->map(function($rider) {
+            \Log::info('Fetching rider registrations...');
+            
+            // Fetch riders without eager loading first
+            $riders = Rider::all();
+            
+            $result = $riders->map(function($rider) {
+                try {
+                    // Load relationships one by one to catch errors
+                    $user = $rider->user;
+                    $address = $user ? $user->address : null;
+                    $vehicle = $rider->vehicle;
+                    $bank = $rider->bank;
+                    $documents = $rider->documents;
+                    
                     return [
                         'id' => $rider->id,
                         'user_id' => $rider->user_id,
-                        'full_name' => $rider->user->first_name . ' ' . $rider->user->last_name,
-                        'email' => $rider->user->email,
+                        'full_name' => $user ? ($user->first_name . ' ' . $user->last_name) : 'N/A',
+                        'email' => $user ? $user->email : 'N/A',
                         'father_name' => $rider->father_name,
                         'mobile_primary' => $rider->mobile_primary,
                         'mobile_alternate' => $rider->mobile_alternate,
                         'cnic_number' => $rider->cnic_number,
                         'driving_license_number' => $rider->driving_license_number,
-                        'city' => $rider->user->address->city ?? 'N/A',
-                        'state' => $rider->user->address->state ?? 'N/A',
-                        'zipcode' => $rider->user->address->zipcode ?? '',
-                        'address' => $rider->user->address->address ?? 'N/A',
-                        'status' => $rider->user->status,
-                        'vehicle_type' => $rider->vehicle->vehicle_type ?? '',
-                        'vehicle_brand' => $rider->vehicle->vehicle_brand ?? '',
-                        'vehicle_model' => $rider->vehicle->vehicle_model ?? '',
-                        'vehicle_registration' => $rider->vehicle->vehicle_registration ?? '',
-                        'registration_no' => $rider->vehicle->registration_no ?? '',
-                        'bank_name' => $rider->bank->bank_name ?? '',
-                        'account_title' => $rider->bank->account_title ?? '',
-                        'documents' => $rider->documents,
+                        'city' => $address ? $address->city : 'N/A',
+                        'state' => $address ? $address->state : 'N/A',
+                        'zipcode' => $address ? $address->zipcode : '',
+                        'address' => $address ? $address->address : 'N/A',
+                        'status' => $user ? $user->status : 'pending',
+                        'vehicle_type' => $vehicle ? $vehicle->vehicle_type : '',
+                        'vehicle_brand' => $vehicle ? $vehicle->vehicle_brand : '',
+                        'vehicle_model' => $vehicle ? $vehicle->vehicle_model : '',
+                        'vehicle_registration' => $vehicle ? $vehicle->vehicle_registration : '',
+                        'registration_no' => $vehicle ? $vehicle->registration_no : '',
+                        'bank_name' => $bank ? $bank->bank_name : '',
+                        'account_title' => $bank ? $bank->account_title : '',
+                        'account_number' => $bank ? $bank->account_number : '',
+                        'vehicle' => $vehicle,
+                        'bank' => $bank,
+                        'documents' => $documents->map(function($doc) {
+                            return [
+                                'id' => $doc->id,
+                                'document_type' => $doc->document_type,
+                                'document_path' => $doc->document_path,
+                                'status' => $doc->status ?? 'pending',
+                                'uploaded_at' => $doc->uploaded_at,
+                                'verified_at' => $doc->verified_at,
+                            ];
+                        }),
                         'created_at' => $rider->created_at,
                         'updated_at' => $rider->updated_at,
                     ];
-                });
+                } catch (\Exception $e) {
+                    \Log::error('Error processing rider ' . $rider->id . ': ' . $e->getMessage());
+                    return null;
+                }
+            })->filter(); // Remove null entries
+            
+            \Log::info('Rider registrations fetched successfully. Count: ' . $result->count());
             
             return response()->json([
                 'status' => true,
-                'data' => $riders
+                'data' => $result->values(), // Re-index array
+                'count' => $result->count()
+            ], 200, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, Authorization'
             ]);
         } catch (\Exception $e) {
+            \Log::error('Failed to fetch registrations: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            
             return response()->json([
                 'status' => false,
                 'message' => 'Failed to fetch registrations',
-                'error' => $e->getMessage()
-            ], 500);
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
+            ], 500, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, Authorization'
+            ]);
         }
     }
 
