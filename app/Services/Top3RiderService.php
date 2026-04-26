@@ -294,6 +294,7 @@ class Top3RiderService
                     'pickup_location' => $request->parcel->pickup_location,
                     'pickup_city' => $request->parcel->pickup_city,
                     'dropoff_location' => $request->parcel->dropoff_location,
+                    'client_address' => $request->parcel->details->client_address ?? 'N/A',
                     'client_name' => $request->parcel->details->client_name ?? 'N/A',
                     'client_phone' => $request->parcel->details->client_phone_number ?? 'N/A',
                     'payment_method' => $request->parcel->payment_method,

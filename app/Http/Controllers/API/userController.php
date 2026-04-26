@@ -22,9 +22,9 @@ class UserController extends Controller
             ->get();
         
         $ridersData = $riders->map(function($rider) {
-            // Get rider data from new normalized structure
+            // Get rider data from new normalized structure with documents
             $riderData = \App\Models\Rider::where('user_id', $rider->id)
-                ->with(['vehicle', 'bank'])
+                ->with(['vehicle', 'bank', 'documents'])
                 ->first();
             
             // Debug for rider ID 42
@@ -55,8 +55,10 @@ class UserController extends Controller
             
             return [
                 'id' => $rider->id,
+                'user_id' => $rider->id,
                 'first_name' => $rider->first_name,
                 'last_name' => $rider->last_name,
+                'full_name' => $rider->first_name . ' ' . $rider->last_name,
                 'email' => $rider->email,
                 'phone' => $rider->phone,
                 'per_parcel_payout' => $rider->per_parcel_payout,
@@ -83,6 +85,23 @@ class UserController extends Controller
                 'vehicle_registration' => ($riderData && $riderData->vehicle) ? ($riderData->vehicle->vehicle_registration ?? null) : null,
                 'bank_name' => ($riderData && $riderData->bank) ? ($riderData->bank->bank_name ?? 'N/A') : 'N/A',
                 'account_title' => ($riderData && $riderData->bank) ? ($riderData->bank->account_title ?? 'N/A') : 'N/A',
+                'account_number' => ($riderData && $riderData->bank) ? ($riderData->bank->account_number ?? 'N/A') : 'N/A',
+                'city' => $rider->address ? $rider->address->city : 'N/A',
+                'state' => $rider->address ? $rider->address->state : 'N/A',
+                'zipcode' => $rider->address ? $rider->address->zipcode : '',
+                'vehicle' => $riderData ? $riderData->vehicle : null,
+                'bank' => $riderData ? $riderData->bank : null,
+                'documents' => $riderData && $riderData->documents ? $riderData->documents->map(function($doc) {
+                    return [
+                        'id' => $doc->id,
+                        'document_type' => $doc->document_type,
+                        'document_path' => $doc->document_path,
+                        'document_url' => $doc->document_path ? url('storage/' . $doc->document_path) : null,
+                        'status' => $doc->status ?? 'pending',
+                        'uploaded_at' => $doc->uploaded_at,
+                        'verified_at' => $doc->verified_at,
+                    ];
+                }) : [],
                 'registration_data' => $riderData ? [
                     'full_name' => $rider->first_name . ' ' . $rider->last_name,
                     'father_name' => $riderData->father_name ?? 'N/A',
@@ -94,6 +113,8 @@ class UserController extends Controller
                     'bank_name' => $riderData->bank ? ($riderData->bank->bank_name ?? 'N/A') : 'N/A',
                     'account_title' => $riderData->bank ? ($riderData->bank->account_title ?? 'N/A') : 'N/A',
                 ] : null,
+                'created_at' => $riderData ? $riderData->created_at : $rider->created_at,
+                'updated_at' => $riderData ? $riderData->updated_at : $rider->updated_at,
                 'last_updated' => now()->toDateTimeString()
             ];
         });
@@ -115,13 +136,37 @@ class UserController extends Controller
     {
         try {
             $rider = User::where('role', 'rider')->findOrFail($id);
-            $address = Address::where('user_id', $rider->id)->first();
+            $address = $rider->address_id ? Address::find($rider->address_id) : null;
+            
+            // Get rider data with relationships
+            $riderData = \App\Models\Rider::where('user_id', $rider->id)
+                ->with(['vehicle', 'bank', 'documents'])
+                ->first();
             
             // Get assigned parcels count
             $assignedParcels = DB::table('parcel')
                 ->where('assigned_to', $rider->id)
                 ->whereIn('parcel_status', ['pending', 'picked_up', 'in_transit'])
                 ->count();
+            
+            // Map documents with full URLs
+            $documents = $riderData && $riderData->documents ? $riderData->documents->map(function($doc) {
+                return [
+                    'id' => $doc->id,
+                    'document_type' => $doc->document_type,
+                    'document_path' => $doc->document_path,
+                    'document_url' => $doc->document_path ? url('storage/' . $doc->document_path) : null,
+                    'status' => $doc->status ?? 'pending',
+                    'uploaded_at' => $doc->uploaded_at,
+                    'verified_at' => $doc->verified_at,
+                ];
+            }) : [];
+            
+            \Log::info('Rider data being sent:', [
+                'rider_id' => $rider->id,
+                'profile_image' => $rider->profile_image,
+                'profile_image_url' => $rider->profile_image ? asset('storage/' . $rider->profile_image) : null
+            ]);
             
             return response()->json([
                 'status' => true,
@@ -134,14 +179,48 @@ class UserController extends Controller
                     'per_parcel_payout' => $rider->per_parcel_payout,
                     'rating' => $rider->rating ?? 5.0,
                     'status' => $rider->status ?? 'active',
-                    'profile_image' => $rider->profile_image ? asset('storage/' . $rider->profile_image) : null,
+                    'profile_image' => $rider->profile_image,
+                    'profile_image_url' => $rider->profile_image ? asset('storage/' . $rider->profile_image) : null,
                     'id_document' => $rider->id_document ? asset('storage/' . $rider->id_document) : null,
                     'license_document' => $rider->license_document ? asset('storage/' . $rider->license_document) : null,
                     'assigned_parcels_count' => $assignedParcels,
-                    'address' => $address
+                    'address' => $address,
+                    'documents' => $documents,
+                    'rider_details' => $riderData ? [
+                        'father_name' => $riderData->father_name ?? 'N/A',
+                        'mobile_primary' => $riderData->mobile_primary ?? 'N/A',
+                        'mobile_alternate' => $riderData->mobile_alternate ?? 'N/A',
+                        'cnic_number' => $riderData->cnic_number ?? 'N/A',
+                        'driving_license_number' => $riderData->driving_license_number ?? 'N/A',
+                    ] : null,
+                    'vehicle' => $riderData && $riderData->vehicle ? [
+                        'vehicle_type' => $riderData->vehicle->vehicle_type ?? 'N/A',
+                        'vehicle_brand' => $riderData->vehicle->vehicle_brand ?? 'N/A',
+                        'vehicle_model' => $riderData->vehicle->vehicle_model ?? 'N/A',
+                        'vehicle_registration' => $riderData->vehicle->vehicle_registration ?? 'Not Provided',
+                    ] : null,
+                    'bank' => $riderData && $riderData->bank ? [
+                        'bank_name' => $riderData->bank->bank_name ?? 'N/A',
+                        'account_number' => $riderData->bank->account_number ?? 'N/A',
+                        'account_title' => $riderData->bank->account_title ?? 'N/A',
+                    ] : null,
+                    // Add direct fields for easy access
+                    'father_name' => $riderData ? $riderData->father_name : null,
+                    'cnic_number' => $riderData ? $riderData->cnic_number : null,
+                    'mobile_primary' => $riderData ? $riderData->mobile_primary : null,
+                    'mobile_alternate' => $riderData ? $riderData->mobile_alternate : null,
+                    'driving_license_number' => $riderData ? $riderData->driving_license_number : null,
+                    'vehicle_type' => $riderData && $riderData->vehicle ? $riderData->vehicle->vehicle_type : null,
+                    'vehicle_brand' => $riderData && $riderData->vehicle ? $riderData->vehicle->vehicle_brand : null,
+                    'vehicle_model' => $riderData && $riderData->vehicle ? $riderData->vehicle->vehicle_model : null,
+                    'vehicle_registration' => $riderData && $riderData->vehicle ? $riderData->vehicle->vehicle_registration : null,
+                    'bank_name' => $riderData && $riderData->bank ? $riderData->bank->bank_name : null,
+                    'account_number' => $riderData && $riderData->bank ? $riderData->bank->account_number : null,
+                    'account_title' => $riderData && $riderData->bank ? $riderData->bank->account_title : null,
                 ]
             ]);
         } catch (\Exception $e) {
+            \Log::error('Error fetching rider:', ['error' => $e->getMessage()]);
             return response()->json([
                 'status' => false,
                 'message' => 'Rider not found'
@@ -288,7 +367,8 @@ class UserController extends Controller
                 'password' => Hash::make($request->password ?? 'password123'),
                 'role' => 'rider',
                 'address_id' => $address->id,
-                'status' => 'active'
+                'status' => 'active',
+                'profile_image' => $uploadedFiles['profile_picture'] ?? null
             ]);
 
             // Update address with user_id
@@ -369,17 +449,16 @@ class UserController extends Controller
     public function createMerchant(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:100',
-            'last_name' => 'required|string|max:100',
+            'business_name' => 'required|string|max:255',
+            'owner_name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'company_name' => 'required|string|max:255',
-            'per_parcel_rate' => 'required|numeric|min:0',
-            'per_parcel_payout' => 'nullable|numeric|min:0',
+            'phone_number' => 'required|string|max:20',
+            'password' => 'required|string|min:6',
+            'full_address' => 'required|string',
             'city' => 'required|string|max:100',
-            'address' => 'required|string',
-            'country' => 'required|string|max:100',
-            'state' => 'required|string|max:100',
-            'zipcode' => 'required|string|max:20',
+            'postal_code' => 'required|string|max:20',
+            'product_type' => 'nullable|string|max:255',
+            'business_document' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);
 
         if ($validator->fails()) {
@@ -391,33 +470,45 @@ class UserController extends Controller
 
         DB::beginTransaction();
         try {
-            $company = \App\Models\MerchantCompany::create([
-                'company_name' => $request->company_name,
-                'per_parcel_rate' => $request->per_parcel_rate,
-                'address' => $request->address
-            ]);
-
-            $merchant = User::create([
-                'first_name' => $request->first_name,
-                'last_name' => $request->last_name,
-                'email' => str_replace('mailto:', '', $request->email),
-                'password' => Hash::make('password123'),
+            // Create user first
+            $user = User::create([
+                'first_name' => $request->owner_name,
+                'last_name' => '',
+                'email' => $request->email,
+                'phone' => $request->phone_number,
+                'password' => Hash::make($request->password),
                 'role' => 'merchant',
-                'company_id' => $company->id,
-                'per_parcel_payout' => $request->per_parcel_payout ?? $request->per_parcel_rate,
             ]);
 
+            // Create merchant company
+            $company = \App\Models\MerchantCompany::create([
+                'user_id' => $user->id,
+                'company_name' => $request->business_name,
+                'address' => $request->full_address,
+                'product_type' => $request->product_type,
+            ]);
+
+            // Update user with company_id
+            $user->company_id = $company->id;
+            $user->per_parcel_payout = 0;
+
+            // Create address
             $address = Address::create([
-                'user_id' => $merchant->id,
+                'user_id' => $user->id,
                 'city' => $request->city,
-                'address' => $request->address,
-                'country' => $request->country,
-                'state' => $request->state,
-                'zipcode' => $request->zipcode,
+                'zipcode' => $request->postal_code,
+                'address' => $request->full_address,
             ]);
 
-            $merchant->address_id = $address->id;
-            $merchant->save();
+            $user->address_id = $address->id;
+            $user->save();
+
+            // Handle business document upload
+            if ($request->hasFile('business_document')) {
+                $path = $request->file('business_document')->store('merchants/documents', 'public');
+                $company->business_document = $path;
+                $company->save();
+            }
 
             DB::commit();
 
@@ -425,15 +516,13 @@ class UserController extends Controller
                 'status' => true,
                 'message' => 'Merchant created successfully',
                 'data' => [
-                    'id' => $merchant->id,
-                    'first_name' => $merchant->first_name,
-                    'last_name' => $merchant->last_name,
-                    'email' => $merchant->email,
-                    'role' => $merchant->role,
-                    'per_parcel_payout' => $merchant->per_parcel_payout,
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'email' => $user->email,
+                    'role' => $user->role,
                     'company_info' => [
                         'company_name' => $company->company_name,
-                        'per_parcel_rate' => $company->per_parcel_rate
+                        'product_type' => $company->product_type
                     ],
                     'address' => $address
                 ]
@@ -518,51 +607,87 @@ class UserController extends Controller
     public function updateMerchant(Request $request, $id)
     {
         $validator = Validator::make($request->all(), [
-            'first_name' => 'string|max:100',
-            'last_name' => 'string|max:100',
-            'email' => 'email|unique:users,email,' . $id,
-            'company_name' => 'string|max:255',
-            'per_parcel_rate' => 'numeric|min:0',
-            'per_parcel_payout' => 'numeric|min:0',
-            'city' => 'string|max:100',
-            'address' => 'string',
-            'country' => 'string|max:100',
-            'state' => 'string|max:100',
-            'zipcode' => 'string|max:20',
+            'business_name' => 'nullable|string|max:255',
+            'owner_name' => 'nullable|string|max:255',
+            'email' => 'nullable|email|unique:users,email,' . $id,
+            'phone_number' => 'nullable|string|max:20',
+            'full_address' => 'nullable|string',
+            'city' => 'nullable|string|max:100',
+            'postal_code' => 'nullable|string|max:20',
+            'product_type' => 'nullable|string|max:255',
+            'business_document' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['status' => false, 'errors' => $validator->errors()], 422);
         }
 
+        DB::beginTransaction();
         try {
             $merchant = User::where('role', 'merchant')->findOrFail($id);
             
             // Update user fields
-            $merchant->update($request->only(['first_name', 'last_name', 'email', 'per_parcel_payout']));
+            if ($request->has('owner_name')) {
+                $merchant->first_name = $request->owner_name;
+            }
+            if ($request->has('email')) {
+                $merchant->email = $request->email;
+            }
+            if ($request->has('phone_number')) {
+                $merchant->phone = $request->phone_number;
+            }
+            $merchant->save();
 
             // Update company if exists and data provided
-            if ($merchant->company_id && ($request->has('company_name') || $request->has('per_parcel_rate'))) {
-                \App\Models\MerchantCompany::where('id', $merchant->company_id)
-                    ->update($request->only(['company_name', 'per_parcel_rate']));
+            if ($merchant->company_id) {
+                $company = \App\Models\MerchantCompany::find($merchant->company_id);
+                if ($company) {
+                    if ($request->has('business_name')) {
+                        $company->company_name = $request->business_name;
+                    }
+                    if ($request->has('full_address')) {
+                        $company->address = $request->full_address;
+                    }
+                    if ($request->has('product_type')) {
+                        $company->product_type = $request->product_type;
+                    }
+                    
+                    // Handle business document upload
+                    if ($request->hasFile('business_document')) {
+                        // Delete old document if exists
+                        if ($company->business_document && \Storage::disk('public')->exists($company->business_document)) {
+                            \Storage::disk('public')->delete($company->business_document);
+                        }
+                        $path = $request->file('business_document')->store('merchants/documents', 'public');
+                        $company->business_document = $path;
+                    }
+                    
+                    $company->save();
+                }
             }
 
             // Update address if data provided
-            if ($request->hasAny(['city', 'address', 'country', 'state', 'zipcode'])) {
-                Address::where('user_id', $id)
-                    ->update($request->only(['city', 'address', 'country', 'state', 'zipcode']));
+            if ($request->hasAny(['city', 'full_address', 'postal_code'])) {
+                $address = Address::where('user_id', $id)->first();
+                if ($address) {
+                    if ($request->has('city')) {
+                        $address->city = $request->city;
+                    }
+                    if ($request->has('full_address')) {
+                        $address->address = $request->full_address;
+                    }
+                    if ($request->has('postal_code')) {
+                        $address->zipcode = $request->postal_code;
+                    }
+                    $address->save();
+                }
             }
+
+            DB::commit();
 
             // Reload merchant with fresh data
             $merchant = User::find($id);
-            
-            // Get company data
-            $company = null;
-            if ($merchant->company_id) {
-                $company = \App\Models\MerchantCompany::find($merchant->company_id);
-            }
-            
-            // Get address data
+            $company = $merchant->company_id ? \App\Models\MerchantCompany::find($merchant->company_id) : null;
             $address = Address::where('user_id', $merchant->id)->first();
 
             return response()->json([
@@ -571,14 +696,14 @@ class UserController extends Controller
                 'data' => [
                     'id' => $merchant->id,
                     'first_name' => $merchant->first_name,
-                    'last_name' => $merchant->last_name,
                     'email' => $merchant->email,
-                    'per_parcel_payout' => $merchant->per_parcel_payout,
+                    'phone' => $merchant->phone,
                     'company' => $company,
                     'address' => $address
                 ]
             ]);
         } catch (\Exception $e) {
+            DB::rollBack();
             return response()->json(['status' => false, 'message' => 'Failed to update merchant: ' . $e->getMessage()], 500);
         }
     }
@@ -605,6 +730,15 @@ class UserController extends Controller
             'country' => 'nullable|string|max:100',
             'state' => 'nullable|string|max:100',
             'zipcode' => 'nullable|string|max:20',
+            'bank_name' => 'nullable|string|max:255',
+            'account_number' => 'nullable|string|max:50',
+            'account_title' => 'nullable|string|max:255',
+            'profile_picture' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'cnic_front_image' => 'nullable|image|max:2048',
+            'cnic_back_image' => 'nullable|image|max:2048',
+            'driving_license_image' => 'nullable|image|max:2048',
+            'vehicle_registration_book' => 'nullable|file|max:5120',
+            'vehicle_image' => 'nullable|image|max:2048',
         ]);
 
         if ($validator->fails()) {
@@ -615,8 +749,18 @@ class UserController extends Controller
         try {
             $user = User::where('role', 'rider')->findOrFail($id);
             
+            // Handle profile picture upload
+            if ($request->hasFile('profile_picture')) {
+                // Delete old profile picture if exists
+                if ($user->profile_image && \Storage::disk('public')->exists($user->profile_image)) {
+                    \Storage::disk('public')->delete($user->profile_image);
+                }
+                $user->profile_image = $request->file('profile_picture')->store('riders/profiles', 'public');
+            }
+            
             // Update user fields
             $user->update($request->only(['first_name', 'last_name', 'email', 'per_parcel_payout']));
+            $user->save();
 
             // Update rider table
             $riderData = \App\Models\Rider::where('user_id', $id)->first();
@@ -629,7 +773,7 @@ class UserController extends Controller
                     'driving_license_number'
                 ]));
 
-                // Update vehicle information - check if vehicle exists first
+                // Update vehicle information
                 $vehicle = \App\Models\RiderVehicle::where('rider_id', $riderData->id)->first();
                 if ($vehicle && $request->hasAny(['vehicle_type', 'vehicle_brand', 'vehicle_model', 'vehicle_registration'])) {
                     $vehicle->update($request->only([
@@ -639,7 +783,6 @@ class UserController extends Controller
                         'vehicle_registration'
                     ]));
                 } elseif (!$vehicle && $request->hasAny(['vehicle_type', 'vehicle_brand', 'vehicle_model', 'vehicle_registration'])) {
-                    // Create vehicle if it doesn't exist but vehicle data is provided
                     \App\Models\RiderVehicle::create([
                         'rider_id' => $riderData->id,
                         'vehicle_type' => $request->vehicle_type,
@@ -647,6 +790,64 @@ class UserController extends Controller
                         'vehicle_model' => $request->vehicle_model,
                         'vehicle_registration' => $request->vehicle_registration
                     ]);
+                }
+
+                // Update or create bank details
+                $bank = \App\Models\RiderBank::where('rider_id', $riderData->id)->first();
+                if ($bank && $request->hasAny(['bank_name', 'account_number', 'account_title'])) {
+                    $bank->update($request->only([
+                        'bank_name',
+                        'account_number',
+                        'account_title'
+                    ]));
+                } elseif (!$bank && $request->has('bank_name')) {
+                    \App\Models\RiderBank::create([
+                        'rider_id' => $riderData->id,
+                        'bank_name' => $request->bank_name,
+                        'account_number' => $request->account_number,
+                        'account_title' => $request->account_title
+                    ]);
+                }
+
+                // Handle document uploads
+                $documentMapping = [
+                    'profile_picture' => 'profile_picture',
+                    'cnic_front_image' => 'cnic_front',
+                    'cnic_back_image' => 'cnic_back',
+                    'driving_license_image' => 'driving_license',
+                    'vehicle_registration_book' => 'vehicle_registration_book',
+                    'vehicle_image' => 'vehicle_image'
+                ];
+
+                foreach ($documentMapping as $field => $docType) {
+                    if ($request->hasFile($field)) {
+                        $path = $request->file($field)->store('riders/documents', 'public');
+                        
+                        // Update or create document
+                        $existingDoc = \App\Models\RiderDocument::where('rider_id', $riderData->id)
+                            ->where('document_type', $docType)
+                            ->first();
+                        
+                        if ($existingDoc) {
+                            // Delete old file
+                            if (\Storage::disk('public')->exists($existingDoc->document_path)) {
+                                \Storage::disk('public')->delete($existingDoc->document_path);
+                            }
+                            $existingDoc->update([
+                                'document_path' => $path,
+                                'status' => 'approved',
+                                'uploaded_at' => now()
+                            ]);
+                        } else {
+                            \App\Models\RiderDocument::create([
+                                'rider_id' => $riderData->id,
+                                'document_type' => $docType,
+                                'document_path' => $path,
+                                'status' => 'approved',
+                                'uploaded_at' => now()
+                            ]);
+                        }
+                    }
                 }
             }
 
@@ -671,6 +872,7 @@ class UserController extends Controller
                     'last_name' => $user->last_name,
                     'email' => $user->email,
                     'per_parcel_payout' => $user->per_parcel_payout,
+                    'profile_image' => $user->profile_image ? asset('storage/' . $user->profile_image) : null,
                     'address' => $address
                 ]
             ]);
@@ -745,6 +947,47 @@ class UserController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => 'Failed to delete rider: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // Get rider document
+    public function getRiderDocument($id, $type)
+    {
+        try {
+            // First find the rider record using user_id
+            $riderData = \App\Models\Rider::where('user_id', $id)->first();
+            
+            if (!$riderData) {
+                return response()->json(['error' => 'Rider not found'], 404);
+            }
+            
+            // Find the document
+            $document = \App\Models\RiderDocument::where('rider_id', $riderData->id)
+                ->where('document_type', str_replace('_image', '', $type))
+                ->first();
+            
+            if (!$document) {
+                return response()->json(['error' => 'Document not found'], 404);
+            }
+            
+            $filePath = $document->document_path;
+            $fullPath = storage_path('app/public/' . $filePath);
+            
+            if (!file_exists($fullPath)) {
+                return response()->json(['error' => 'File does not exist'], 404);
+            }
+            
+            return response()->file($fullPath, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET',
+                'Access-Control-Allow-Headers' => 'Content-Type'
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Document access failed',
+                'message' => $e->getMessage()
             ], 500);
         }
     }

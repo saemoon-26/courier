@@ -41,13 +41,10 @@ class ParcelController extends Controller
                 'assigned_rider_name' => $rider ? ($rider->first_name . ' ' . $rider->last_name) : 'Pending Assignment',
                 'pickup_location' => $parcel->pickup_location,
                 'pickup_city' => $parcel->pickup_city,
-                'dropoff_location' => $parcel->dropoff_location,
-                'dropoff_city' => $parcel->dropoff_city,
                 'parcel_status' => $parcel->parcel_status,
                 'payment_method' => $parcel->payment_method,
                 'rider_payout' => $parcel->rider_payout,
                 'company_payout' => $parcel->company_payout,
-                'collected_by_rider' => $parcel->collected_by_rider,
                 'details' => $parcel->details
             ];
         });
@@ -71,13 +68,13 @@ class ParcelController extends Controller
         'pickup_city' => 'required|string',
         'dropoff_city' => 'nullable|string',
         'parcel_status' => 'nullable|in:pending,pickup_requested,picked_up,out_for_delivery,delivered,cancelled',
-        'payment_method' => 'required|in:cod,online',
+        'payment_method' => 'required|string',
         'rider_payout' => 'nullable|numeric|min:0',
         'company_payout' => 'nullable|numeric|min:0',
         'company_id' => 'nullable|integer|exists:merchant_companies,id',
 
-        'client_name' => 'required|string',
-        'client_phone_number' => 'required|string',
+        'client_name' => 'required|string|regex:/^[a-zA-Z\s]+$/',
+        'client_phone_number' => 'required|string|regex:/^[0-9]{10,15}$/',
         'client_address' => 'required|string',
         'client_email' => 'nullable|email',
     ]);
@@ -114,8 +111,6 @@ class ParcelController extends Controller
             'assigned_to' => $assigned_to,
             'pickup_location' => $request->pickup_location,
             'pickup_city' => $request->pickup_city,
-            'dropoff_location' => $request->dropoff_location,
-            'dropoff_city' => $request->dropoff_city,
             'parcel_status' => $request->parcel_status ?? 'pending',
             'payment_method' => $request->payment_method,
             'rider_payout' => $rider_payout,
@@ -124,12 +119,14 @@ class ParcelController extends Controller
 
         // ✅ Geocode pickup location and cache in DB
         try {
-            $geocoder = new \App\Services\GeocodingService();
-            $pickupCoords = $geocoder->geocodeAddress($request->pickup_location, $request->pickup_city);
-            if ($pickupCoords) {
-                $parcel->pickup_lat = $pickupCoords['latitude'];
-                $parcel->pickup_lng = $pickupCoords['longitude'];
-                $parcel->save();
+            if (class_exists('\App\Services\GeocodingService')) {
+                $geocoder = new \App\Services\GeocodingService();
+                $pickupCoords = $geocoder->geocodeAddress($request->pickup_location, $request->pickup_city);
+                if ($pickupCoords) {
+                    $parcel->pickup_lat = $pickupCoords['latitude'];
+                    $parcel->pickup_lng = $pickupCoords['longitude'];
+                    $parcel->save();
+                }
             }
         } catch (\Exception $e) {
             \Log::warning('Geocoding failed for pickup: ' . $e->getMessage());
@@ -146,13 +143,15 @@ class ParcelController extends Controller
 
         // ✅ Geocode client address and cache in DB
         try {
-            $geocoder = new \App\Services\GeocodingService();
-            $clientCoords = $geocoder->geocodeAddress($request->client_address);
-            if ($clientCoords) {
-                ParcelDetail::where('parcel_id', $parcel->parcel_id)->update([
-                    'client_latitude' => $clientCoords['latitude'],
-                    'client_longitude' => $clientCoords['longitude']
-                ]);
+            if (class_exists('\App\Services\GeocodingService')) {
+                $geocoder = new \App\Services\GeocodingService();
+                $clientCoords = $geocoder->geocodeAddress($request->client_address);
+                if ($clientCoords) {
+                    ParcelDetail::where('parcel_id', $parcel->parcel_id)->update([
+                        'client_latitude' => $clientCoords['latitude'],
+                        'client_longitude' => $clientCoords['longitude']
+                    ]);
+                }
             }
         } catch (\Exception $e) {
             \Log::warning('Geocoding failed for client: ' . $e->getMessage());
@@ -171,9 +170,11 @@ class ParcelController extends Controller
         $riderRequestResult = ['success' => false, 'riders' => []];
         if (!$assigned_to) {
             try {
-                $top3Service = new Top3RiderService();
-                $riderRequestResult = $top3Service->sendRequestToTop3Riders($parcel->parcel_id);
-                \Log::info('Top 3 riders notified', $riderRequestResult);
+                if (class_exists('\App\Services\Top3RiderService')) {
+                    $top3Service = new Top3RiderService();
+                    $riderRequestResult = $top3Service->sendRequestToTop3Riders($parcel->parcel_id);
+                    \Log::info('Top 3 riders notified', $riderRequestResult);
+                }
             } catch (\Exception $e) {
                 \Log::error('Rider Request Error: ' . $e->getMessage());
             }
@@ -210,10 +211,15 @@ class ParcelController extends Controller
 
     } catch (\Exception $e) {
         DB::rollBack();
+        
+        \Log::error('Parcel Creation Error: ' . $e->getMessage());
+        \Log::error('Stack Trace: ' . $e->getTraceAsString());
 
         return response()->json([
             'status' => false,
-            'error' => $e->getMessage()
+            'error' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => basename($e->getFile())
         ], 500);
     }
 }
@@ -246,8 +252,6 @@ public function show($id)
             'tracking_code' => $parcel->tracking_code,
             'pickup_location' => $parcel->pickup_location,
             'pickup_city' => $parcel->pickup_city,
-            'dropoff_location' => $parcel->dropoff_location,
-            'dropoff_city' => $parcel->dropoff_city,
             'assigned_to' => $parcel->assigned_to,
             'assigned_rider_name' => $assignedRider,
             'parcel_status' => $parcel->parcel_status,
@@ -318,8 +322,6 @@ public function getByTrackingCode($trackingCode)
             'tracking_code' => $parcel->tracking_code,
             'pickup_location' => $parcel->pickup_location,
             'pickup_city' => $parcel->pickup_city,
-            'dropoff_location' => $parcel->dropoff_location,
-            'dropoff_city' => $parcel->dropoff_city,
             'parcel_status' => $parcel->parcel_status,
             'payment_method' => $parcel->payment_method,
             'assigned_rider_name' => $assignedRider,
@@ -349,13 +351,13 @@ public function update(Request $request, $id)
         'dropoff_location' => 'string',
         'dropoff_city' => 'nullable|string',
         'parcel_status' => 'in:pending,pickup_requested,picked_up,out_for_delivery,delivered,cancelled',
-        'payment_method' => 'in:cod,online',
+        'payment_method' => 'in:cod,Cash on Delivery,JazzCash,online',
         'rider_payout' => 'nullable|numeric|min:0',
         'collected_by_rider' => 'nullable|numeric|min:0',
         'company_payout' => 'nullable|numeric|min:0',
         
-        'client_name' => 'string',
-        'client_phone_number' => 'string',
+        'client_name' => 'string|regex:/^[a-zA-Z\s]+$/',
+        'client_phone_number' => 'string|regex:/^[0-9]{10,15}$/',
         'client_address' => 'string',
         'client_email' => 'nullable|email',
     ]);
@@ -371,7 +373,7 @@ public function update(Request $request, $id)
     try {
         // Update parcel first
         $updateData = $request->only([
-            'tracking_code', 'pickup_location', 'pickup_city', 'dropoff_location', 'dropoff_city',
+            'tracking_code', 'pickup_location', 'pickup_city',
             'parcel_status', 'payment_method', 'rider_payout', 'collected_by_rider', 'company_payout'
         ]);
         
@@ -531,13 +533,66 @@ public function getMerchantParcels($merchantId)
 {
     try {
         $parcels = DB::table('parcel')
-            ->where('merchant_id', $merchantId)
-            ->orderBy('created_at', 'desc')
-            ->get();
+            ->leftJoin('parcel_details', 'parcel.parcel_id', '=', 'parcel_details.parcel_id')
+            ->leftJoin('users as rider', 'parcel.assigned_to', '=', 'rider.id')
+            ->where('parcel.merchant_id', $merchantId)
+            ->select(
+                'parcel.parcel_id',
+                'parcel.tracking_code',
+                'parcel.merchant_id',
+                'parcel.assigned_to',
+                'parcel.pickup_location',
+                'parcel.pickup_city',
+                'parcel.parcel_status',
+                'parcel.payment_method',
+                'parcel.rider_payout',
+                'parcel.company_payout',
+                'parcel.created_at',
+                'parcel.updated_at',
+                'parcel_details.client_name',
+                'parcel_details.client_phone_number',
+                'parcel_details.client_address',
+                'parcel_details.client_email',
+                DB::raw('CONCAT(COALESCE(rider.first_name, ""), " ", COALESCE(rider.last_name, "")) as rider_name')
+            )
+            ->orderBy('parcel.created_at', 'desc')
+            ->get()
+            ->map(function($parcel) {
+                return [
+                    'parcel_id' => $parcel->parcel_id,
+                    'tracking_code' => $parcel->tracking_code,
+                    'merchant_id' => $parcel->merchant_id,
+                    'assigned_to' => $parcel->assigned_to,
+                    'assigned_rider_name' => trim($parcel->rider_name) ?: 'N/A',
+                    'pickup_location' => $parcel->pickup_location,
+                    'pickup_city' => $parcel->pickup_city,
+                    'status' => $parcel->parcel_status,
+                    'parcel_status' => $parcel->parcel_status,
+                    'payment_method' => $parcel->payment_method,
+                    'rider_payout' => $parcel->rider_payout ?? 0,
+                    'company_payout' => $parcel->company_payout ?? 0,
+                    'client_name' => $parcel->client_name,
+                    'client_phone_number' => $parcel->client_phone_number,
+                    'client_address' => $parcel->client_address,
+                    'client_email' => $parcel->client_email,
+                    'created_at' => $parcel->created_at,
+                    'updated_at' => $parcel->updated_at,
+                ];
+            });
         
-        return response()->json($parcels);
+        return response()->json([
+            'status' => true,
+            'data' => $parcels,
+            'count' => $parcels->count()
+        ]);
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Failed to fetch parcels'], 500);
+        \Log::error('Error fetching merchant parcels: ' . $e->getMessage());
+        \Log::error('Stack trace: ' . $e->getTraceAsString());
+        return response()->json([
+            'status' => false,
+            'error' => 'Failed to fetch parcels',
+            'message' => $e->getMessage()
+        ], 500);
     }
 }
 
@@ -550,9 +605,9 @@ public function requestDelivery(Request $request)
         'pickup_city' => 'required|string',
         'dropoff_location' => 'required|string',
         'dropoff_city' => 'required|string',
-        'payment_method' => 'required|in:cod,online',
-        'client_name' => 'required|string',
-        'client_phone' => 'required|string',
+        'payment_method' => 'required|in:cod,Cash on Delivery,JazzCash,online',
+        'client_name' => 'required|string|regex:/^[a-zA-Z\s]+$/',
+        'client_phone' => 'required|string|regex:/^[0-9]{10,15}$/',
         'client_address' => 'required|string',
         'client_email' => 'nullable|email',
     ]);
@@ -623,6 +678,147 @@ public function requestDelivery(Request $request)
     } catch (\Exception $e) {
         DB::rollBack();
         return response()->json(['status' => false, 'error' => $e->getMessage()], 500);
+    }
+}
+
+public function createDeliveryRequest(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'merchant_id' => 'required|integer|exists:users,id',
+        'pickup_address' => 'required|string',
+        'pickup_city' => 'required|string',
+        'total_parcels' => 'required|integer|min:1',
+        'parcel_weight' => 'nullable|string',
+        'special_instructions' => 'nullable|string',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['status' => false, 'errors' => $validator->errors()], 422);
+    }
+
+    try {
+        $requestId = DB::table('merchant_delivery_requests')->insertGetId([
+            'merchant_id' => $request->merchant_id,
+            'pickup_address' => $request->pickup_address,
+            'pickup_city' => $request->pickup_city,
+            'total_parcels' => $request->total_parcels,
+            'parcel_weight' => $request->parcel_weight,
+            'special_instructions' => $request->special_instructions,
+            'request_status' => 'rider_request_sent',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Delivery request submitted successfully',
+            'request_id' => $requestId
+        ], 201);
+
+    } catch (\Exception $e) {
+        \Log::error('Error creating delivery request: ' . $e->getMessage());
+        return response()->json([
+            'status' => false,
+            'error' => 'Failed to create delivery request',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+
+public function getAllDeliveryRequests()
+{
+    try {
+        $requests = DB::table('merchant_delivery_requests as mdr')
+            ->join('users as u', 'mdr.merchant_id', '=', 'u.id')
+            ->leftJoin('merchant_companies as mc', 'u.company_id', '=', 'mc.id')
+            ->select(
+                'mdr.*',
+                'u.first_name',
+                'u.last_name',
+                'u.email',
+                'u.phone',
+                'mc.company_name',
+                'mc.address as company_address',
+                'mc.product_type'
+            )
+            ->orderBy('mdr.created_at', 'desc')
+            ->get()
+            ->map(function($request) {
+                return [
+                    'id' => $request->id,
+                    'merchant_id' => $request->merchant_id,
+                    'merchant_name' => $request->first_name . ' ' . $request->last_name,
+                    'company_name' => $request->company_name,
+                    'merchant_email' => $request->email,
+                    'merchant_phone' => $request->phone,
+                    'company_address' => $request->company_address,
+                    'product_type' => $request->product_type,
+                    'pickup_address' => $request->pickup_address,
+                    'pickup_city' => $request->pickup_city,
+                    'total_parcels' => $request->total_parcels,
+                    'parcel_weight' => $request->parcel_weight,
+                    'special_instructions' => $request->special_instructions,
+                    'request_status' => $request->request_status,
+                    'admin_notes' => $request->admin_notes,
+                    'created_at' => $request->created_at,
+                    'updated_at' => $request->updated_at,
+                ];
+            });
+
+        return response()->json([
+            'status' => true,
+            'data' => $requests,
+            'count' => $requests->count()
+        ]);
+    } catch (\Exception $e) {
+        \Log::error('Error fetching delivery requests: ' . $e->getMessage());
+        return response()->json([
+            'status' => false,
+            'error' => 'Failed to fetch delivery requests',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+
+public function updateDeliveryRequestStatus(Request $request, $id)
+{
+    $validator = Validator::make($request->all(), [
+        'request_status' => 'required|in:rider_request_sent,admin_approved,pickup_completed,in_process,completed,rejected',
+        'admin_notes' => 'nullable|string',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['status' => false, 'errors' => $validator->errors()], 422);
+    }
+
+    try {
+        $updated = DB::table('merchant_delivery_requests')
+            ->where('id', $id)
+            ->update([
+                'request_status' => $request->request_status,
+                'admin_notes' => $request->admin_notes,
+                'updated_at' => now(),
+            ]);
+
+        if ($updated) {
+            return response()->json([
+                'status' => true,
+                'message' => 'Request status updated successfully'
+            ]);
+        }
+
+        return response()->json([
+            'status' => false,
+            'message' => 'Request not found'
+        ], 404);
+
+    } catch (\Exception $e) {
+        \Log::error('Error updating delivery request: ' . $e->getMessage());
+        return response()->json([
+            'status' => false,
+            'error' => 'Failed to update request status',
+            'message' => $e->getMessage()
+        ], 500);
     }
 }
 

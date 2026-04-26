@@ -23,6 +23,7 @@ class User extends Authenticatable
         'company_id',
         'per_parcel_payout',
         'status',
+        'profile_image',
     ];
 
     // Auto-load address relation when needed
@@ -33,14 +34,19 @@ class User extends Authenticatable
         return $this->belongsTo(Address::class, 'address_id');
     }
 
-    public function parcels()
-{
-    return $this->hasMany(Parcel::class, 'assigned_to');
-}
+    public function rider()
+    {
+        return $this->hasOne(Rider::class, 'user_id');
+    }
 
-public function company()
-{
-    return $this->belongsTo(MerchantCompany::class, 'company_id');
-}
+    public function parcels()
+    {
+        return $this->hasMany(Parcel::class, 'assigned_to');
+    }
+
+    public function company()
+    {
+        return $this->belongsTo(MerchantCompany::class, 'company_id');
+    }
 
 }

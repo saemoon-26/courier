@@ -9,11 +9,13 @@ use App\Http\Controllers\API\RiderDashboardController;
 use App\Http\Controllers\API\RiderRegistrationController;
 use App\Http\Controllers\API\RiderAuthController;
 use App\Http\Controllers\API\MerchantRegistrationController;
+use App\Http\Controllers\API\MerchantProfileController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\AdminDashboardController;
+use App\Http\Controllers\API\ParcelRiderRequestController;
 
 // Rider Registration routes
 Route::post('/rider-registrations', [RiderRegistrationController::class, 'store']);
@@ -57,6 +59,9 @@ Route::get('/user/{id}', [AuthController::class, 'show']);
 
 // Parcel Management
 Route::get('/parcels', [ParcelController::class, 'getAllParcels']);
+// Get all rider requests for all parcels in one call (MUST be before {parcelId} route)
+Route::get('/parcels/all-rider-requests', [ParcelRiderRequestController::class, 'getAllParcelRiderRequests']);
+Route::get('/parcels/{parcelId}/rider-requests', [ParcelRiderRequestController::class, 'getParcelRiderRequests']);
 Route::get('/generate-tracking-code', [ParcelController::class, 'generateTrackingCode']);
 Route::get('/parcels/track/{trackingCode}', [ParcelController::class, 'getByTrackingCode']);
 Route::post('/parcels', [ParcelController::class, 'store']);
@@ -65,7 +70,9 @@ Route::put('/parcels/{id}', [ParcelController::class, 'update']);
 Route::delete('/parcels/{id}', [ParcelController::class, 'destroy']);
 Route::post('/verify-delivery', [ParcelController::class, 'verifyDelivery']);
 Route::get('/merchant/{merchantId}/parcels', [ParcelController::class, 'getMerchantParcels']);
-Route::post('/merchant/request-delivery', [ParcelController::class, 'requestDelivery']);
+Route::post('/merchant/delivery-request', [ParcelController::class, 'createDeliveryRequest']);
+Route::get('/merchant/delivery-requests', [ParcelController::class, 'getAllDeliveryRequests']);
+Route::post('/merchant/delivery-request/{id}/update-status', [ParcelController::class, 'updateDeliveryRequestStatus']);
 
 // Real-time Tracking
 Route::post('/rider/location/update', [TrackingController::class, 'updateRiderLocation']);
@@ -235,8 +242,11 @@ Route::get('/riders/{id}', [UserController::class, 'getRider']);
 Route::put('/riders/{id}', [UserController::class, 'updateRider']);
 Route::delete('/riders/{id}', [UserController::class, 'deleteRider']);
 Route::get('/riders/{id}/parcels', [RiderController::class, 'parcels']);
+Route::get('/riders/{id}/document/{type}', [UserController::class, 'getRiderDocument']);
 Route::get('/merchants', [UserController::class, 'getAllMerchants']);
 Route::get('/merchants/{id}', [UserController::class, 'getMerchant']);
+Route::get('/merchants/{id}/profile', [MerchantProfileController::class, 'getProfile']);
+Route::post('/merchants/{id}/profile', [MerchantProfileController::class, 'updateProfile']);
 Route::post('/merchants', [UserController::class, 'createMerchant']);
 Route::put('/merchants/{id}', [UserController::class, 'updateMerchant']);
 Route::delete('/merchants/{id}', [UserController::class, 'deleteMerchant']);

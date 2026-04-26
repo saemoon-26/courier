@@ -10,35 +10,6 @@ use Illuminate\Support\Facades\DB;
 
 class RiderController extends Controller
 {
-    // GET /api/riders/{id} - Get single rider by ID
-    public function show($id)
-    {
-        $rider = User::where('role', 'rider')
-            ->where('id', $id)
-            ->with('address')
-            ->first();
-
-        if (!$rider) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Rider not found'
-            ], 404);
-        }
-
-        return response()->json([
-            'status' => true,
-            'data' => [
-                'id' => $rider->id,
-                'first_name' => $rider->first_name,
-                'last_name' => $rider->last_name,
-                'email' => $rider->email,
-                'phone_number' => $rider->phone,
-                'rating' => $rider->rating ?? 5.0,
-                'address' => $rider->address
-            ]
-        ]);
-    }
-
     // GET /api/riders/{id}/parcels - Get all parcels for specific rider
     public function parcels($id)
     {

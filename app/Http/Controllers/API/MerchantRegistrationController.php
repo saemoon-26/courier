@@ -22,10 +22,7 @@ class MerchantRegistrationController extends Controller
             'full_address' => 'required|string',
             'city' => 'required|string|max:100',
             'postal_code' => 'required|string|max:20',
-            'bank_name' => 'nullable|string|max:255',
-            'account_number' => 'nullable|string|max:255',
             'product_type' => 'nullable|string|max:255',
-            'avg_parcels_per_day' => 'nullable|integer|min:0',
             'business_document' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);
 
@@ -44,11 +41,8 @@ class MerchantRegistrationController extends Controller
             'user_id' => $user->id,
             'company_name' => $request->business_name,
             'address' => $request->full_address,
-            'per_parcel_rate' => $request->avg_parcels_per_day ?? 0,
+            'per_parcel_rate' => 0,
             'product_type' => $request->product_type,
-            'bank_name' => $request->bank_name,
-            'account_number' => $request->account_number,
-            'avg_parcels_per_day' => $request->avg_parcels_per_day,
         ]);
 
         // Update user with company_id
